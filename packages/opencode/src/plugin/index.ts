@@ -10,16 +10,18 @@ import { Flag } from "../flag/flag"
 import { CodexAuthPlugin } from "./codex"
 import { Session } from "../session"
 import { NamedError } from "@opencode-ai/util/error"
-import { CopilotAuthPlugin } from "./copilot"
 import { gitlabAuthPlugin as GitlabAuthPlugin } from "@gitlab/opencode-gitlab-auth"
 
 export namespace Plugin {
   const log = Log.create({ service: "plugin" })
 
-  const BUILTIN = ["opencode-anthropic-auth@0.0.13"]
+  // opencode-copilot-auth uses the correct GitHub App client ID (Iv1.b507a08c87ecfe98)
+  // which supports token exchange for gpt-5.3-codex and other advanced models
+  const BUILTIN = ["opencode-anthropic-auth@0.0.13", "opencode-copilot-auth@0.0.12"]
 
   // Built-in plugins that are directly imported (not installed from npm)
-  const INTERNAL_PLUGINS: PluginInstance[] = [CodexAuthPlugin, CopilotAuthPlugin, GitlabAuthPlugin]
+  // Note: CopilotAuthPlugin removed in favor of opencode-copilot-auth npm package
+  const INTERNAL_PLUGINS: PluginInstance[] = [CodexAuthPlugin, GitlabAuthPlugin]
 
   const state = Instance.state(async () => {
     const client = createOpencodeClient({
