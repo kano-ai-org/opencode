@@ -399,6 +399,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     const workspaceVersion = new Map<string, number>()
     const workspaceLoaded = new Set<string>()
     const workspaceLoading = new Set<string>()
+    const workspacePendingSync = new Set<string>()
 
     const requestHeaders = (json = false) => {
       const password = typeof window === "undefined" ? undefined : window.__OPENCODE__?.serverPassword
@@ -498,7 +499,12 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
 
     const syncWorkspaceToggles = async (directory: string) => {
       const project = projectForWorkspace(directory)
-      if (!project?.id) return
+      if (!project?.id) {
+        workspacePendingSync.add(directory)
+        return
+      }
+
+      workspacePendingSync.delete(directory)
 
       if (!workspaceLoaded.has(project.id)) await hydrateWorkspaceToggles(directory, true)
 
@@ -524,6 +530,16 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         }
       }
     }
+
+    createEffect(() => {
+      if (!globalSync.ready) return
+      for (const directory of Array.from(workspacePendingSync)) {
+        const project = projectForWorkspace(directory)
+        if (!project?.id) continue
+        workspacePendingSync.delete(directory)
+        void syncWorkspaceToggles(directory)
+      }
+    })
 
     createEffect(() => {
       if (!globalSync.ready) return

@@ -3,6 +3,20 @@ import { openSidebar, seedProjects, setWorkspacesEnabled } from "../actions"
 import { promptSelector } from "../selectors"
 import { sessionPath } from "../utils"
 
+async function hasVisibleButton(page: { getByRole: Function }, name: string) {
+  const buttons = page.getByRole("button", { name })
+  const count = await buttons.count()
+  for (const index of Array.from({ length: count }, (_, i) => i)) {
+    const visible = await buttons
+      .nth(index)
+      .isVisible()
+      .then((result: boolean) => result)
+      .catch(() => false)
+    if (visible) return true
+  }
+  return false
+}
+
 test("workspace toggle syncs across browser contexts after reload", async ({ page, withProject }) => {
   await withProject(async ({ directory, slug, gotoSession }) => {
     await gotoSession()
@@ -35,12 +49,22 @@ test("workspace toggle syncs across browser contexts after reload", async ({ pag
       await setWorkspacesEnabled(page, slug, true)
       await secondPage.reload()
       await expect(secondPage.locator(promptSelector)).toBeVisible()
-      await expect(secondPage.getByRole("button", { name: "New workspace" }).first()).toBeVisible()
+      await openSidebar(secondPage)
+      await expect
+        .poll(async () => {
+          return await hasVisibleButton(secondPage, "New workspace")
+        }, { timeout: 30_000 })
+        .toBe(true)
 
       await setWorkspacesEnabled(secondPage, slug, false)
       await page.reload()
       await expect(page.locator(promptSelector)).toBeVisible()
-      await expect(page.getByRole("button", { name: "New session" }).first()).toBeVisible()
+      await openSidebar(page)
+      await expect
+        .poll(async () => {
+          return await hasVisibleButton(page, "New session")
+        }, { timeout: 30_000 })
+        .toBe(true)
     } finally {
       await secondContext.close()
     }
