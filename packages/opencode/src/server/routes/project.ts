@@ -78,5 +78,68 @@ export const ProjectRoutes = lazy(() =>
         const project = await Project.update({ ...body, projectID })
         return c.json(project)
       },
+    )
+    .get(
+      "/:projectID/workspace-toggles",
+      describeRoute({
+        summary: "Get workspace toggles",
+        description: "Get the persisted workspace visibility toggles for a project.",
+        operationId: "project.workspaceToggles",
+        responses: {
+          200: {
+            description: "Workspace toggle state",
+            content: {
+              "application/json": {
+                schema: resolver(Project.WorkspaceToggles),
+              },
+            },
+          },
+          ...errors(404),
+        },
+      }),
+      validator("param", z.object({ projectID: z.string() })),
+      async (c) => {
+        const projectID = c.req.valid("param").projectID
+        return c.json(Project.getWorkspaceToggles(projectID))
+      },
+    )
+    .patch(
+      "/:projectID/workspace-toggles",
+      describeRoute({
+        summary: "Update workspace toggles",
+        description: "Update persisted workspace visibility toggles for a project.",
+        operationId: "project.workspaceTogglesPatch",
+        responses: {
+          200: {
+            description: "Workspace toggle state after update",
+            content: {
+              "application/json": {
+                schema: resolver(Project.WorkspaceToggles),
+              },
+            },
+          },
+          409: {
+            description: "Conflict due to stale version",
+            content: {
+              "application/json": {
+                schema: resolver(Project.WorkspaceToggles),
+              },
+            },
+          },
+          ...errors(404),
+        },
+      }),
+      validator("param", z.object({ projectID: z.string() })),
+      validator("json", Project.WorkspaceToggles),
+      async (c) => {
+        const projectID = c.req.valid("param").projectID
+        const body = c.req.valid("json")
+        const result = await Project.updateWorkspaceToggles({
+          projectID,
+          version: body.version,
+          toggles: body.toggles,
+        })
+        return c.json(result.data, result.status)
+      },
     ),
 )

@@ -11,5 +11,7 @@ export const ProjectTable = sqliteTable("project", {
   ...Timestamps,
   time_initialized: integer(),
   sandboxes: text({ mode: "json" }).notNull().$type<string[]>(),
+  workspace_toggles: text({ mode: "json" }).notNull().$type<Record<string, boolean>>(),
+  workspace_toggles_version: integer().notNull(),
   commands: text({ mode: "json" }).$type<{ start?: string }>(),
 })

@@ -3,14 +3,24 @@
 import os from "os"
 import path from "path"
 import fs from "fs/promises"
-import fsSync from "fs"
 import { afterAll } from "bun:test"
 
 // Set XDG env vars FIRST, before any src/ imports
 const dir = path.join(os.tmpdir(), "opencode-test-data-" + process.pid)
 await fs.mkdir(dir, { recursive: true })
-afterAll(() => {
-  fsSync.rmSync(dir, { recursive: true, force: true })
+afterAll(async () => {
+  await fs
+    .rm(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    })
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "EBUSY") return
+      if (error.code === "ENOTEMPTY") return
+      throw error
+    })
 })
 
 process.env["XDG_DATA_HOME"] = path.join(dir, "share")

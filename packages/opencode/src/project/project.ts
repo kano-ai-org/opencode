@@ -1,7 +1,7 @@
 import z from "zod"
 import { Filesystem } from "../util/filesystem"
 import path from "path"
-import { Database, eq } from "../storage/db"
+import { Database, NotFoundError, and, eq } from "../storage/db"
 import { ProjectTable } from "./project.sql"
 import { SessionTable } from "../session/session.sql"
 import { Log } from "../util/log"
@@ -50,7 +50,35 @@ export namespace Project {
     Updated: BusEvent.define("project.updated", Info),
   }
 
+  export const WorkspaceToggles = z
+    .object({
+      version: z.number().int().nonnegative(),
+      toggles: z.record(z.string(), z.boolean()),
+    })
+    .meta({
+      ref: "ProjectWorkspaceToggles",
+    })
+
+  export const WorkspaceTogglesInput = z.object({
+    projectID: z.string(),
+    version: z.number().int().nonnegative(),
+    toggles: z.record(z.string(), z.boolean()),
+  })
+
   type Row = typeof ProjectTable.$inferSelect
+
+  const sanitizeWorkspaceToggles = (row: Row, toggles: Record<string, boolean>) => {
+    const allowed = new Set([row.worktree, ...row.sandboxes])
+    return Object.fromEntries(Object.entries(toggles).filter(([directory]) => allowed.has(directory)))
+  }
+
+  const workspaceTogglesFromRow = (row: Row) => {
+    const toggles = sanitizeWorkspaceToggles(row, row.workspace_toggles ?? {})
+    return {
+      version: row.workspace_toggles_version,
+      toggles,
+    }
+  }
 
   export function fromRow(row: Row): Info {
     const icon =
@@ -236,6 +264,8 @@ export namespace Project {
       time_updated: result.time.updated,
       time_initialized: result.time.initialized,
       sandboxes: result.sandboxes,
+      workspace_toggles: row?.workspace_toggles ?? {},
+      workspace_toggles_version: row?.workspace_toggles_version ?? 0,
       commands: result.commands,
     }
     const updateSet = {
@@ -247,6 +277,8 @@ export namespace Project {
       time_updated: result.time.updated,
       time_initialized: result.time.initialized,
       sandboxes: result.sandboxes,
+      workspace_toggles: row?.workspace_toggles ?? {},
+      workspace_toggles_version: row?.workspace_toggles_version ?? 0,
       commands: result.commands,
     }
     Database.use((db) =>
@@ -374,6 +406,57 @@ export namespace Project {
       return data
     },
   )
+
+  export function getWorkspaceToggles(projectID: string) {
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, projectID)).get())
+    if (!row) {
+      throw new NotFoundError({ message: `Project not found: ${projectID}` })
+    }
+    return WorkspaceToggles.parse(workspaceTogglesFromRow(row))
+  }
+
+  export const updateWorkspaceToggles = fn(WorkspaceTogglesInput, async (input) => {
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, input.projectID)).get())
+    if (!row) {
+      throw new NotFoundError({ message: `Project not found: ${input.projectID}` })
+    }
+
+    const current = workspaceTogglesFromRow(row)
+    if (input.version !== current.version) {
+      return {
+        status: 409 as const,
+        data: WorkspaceToggles.parse(current),
+      }
+    }
+
+    const toggles = sanitizeWorkspaceToggles(row, input.toggles)
+    const nextVersion = current.version + 1
+    const updated = Database.use((db) =>
+      db
+        .update(ProjectTable)
+        .set({
+          workspace_toggles: toggles,
+          workspace_toggles_version: nextVersion,
+          time_updated: Date.now(),
+        })
+        .where(and(eq(ProjectTable.id, input.projectID), eq(ProjectTable.workspace_toggles_version, input.version)))
+        .returning()
+        .get(),
+    )
+
+    if (!updated) {
+      const latest = getWorkspaceToggles(input.projectID)
+      return {
+        status: 409 as const,
+        data: latest,
+      }
+    }
+
+    return {
+      status: 200 as const,
+      data: WorkspaceToggles.parse(workspaceTogglesFromRow(updated)),
+    }
+  })
 
   export async function sandboxes(id: string) {
     const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
