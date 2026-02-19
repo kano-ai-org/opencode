@@ -9,6 +9,15 @@ import { createMemo, createResource, createSignal } from "solid-js"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
+import {
+  cleanInput,
+  joinPath,
+  normalizeDriveRoot,
+  parentOf,
+  rootOf,
+  tildeOf,
+  trimTrailing,
+} from "./dialog-select-directory-path"
 
 interface DialogSelectDirectoryProps {
   title?: string
@@ -21,83 +30,33 @@ type Row = {
   search: string
 }
 
-function cleanInput(value: string) {
-  const first = (value ?? "").split(/\r?\n/)[0] ?? ""
-  return first.replace(/[\u0000-\u001F\u007F]/g, "").trim()
+const WINDOWS_DRIVES = "CDEFGHIJKLMNOPQRSTUVWXYZ".split("")
+
+function driveRoot(input: string) {
+  const root = rootOf(input)
+  if (!/^[A-Za-z]:\/$/.test(root)) return ""
+  return root
 }
 
-function normalizePath(input: string) {
-  const v = input.replaceAll("\\", "/")
-  if (v.startsWith("//") && !v.startsWith("///")) return "//" + v.slice(2).replace(/\/+/g, "/")
-  return v.replace(/\/+/g, "/")
+function dedupe(items: string[]) {
+  const out = [] as string[]
+  const seen = new Set<string>()
+  for (const item of items) {
+    const normalized = trimTrailing(normalizeDriveRoot(item))
+    const key = /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(normalized)
+  }
+  return out
 }
 
-function normalizeDriveRoot(input: string) {
-  const v = normalizePath(input)
-  if (/^[A-Za-z]:$/.test(v)) return v + "/"
-  return v
-}
-
-function trimTrailing(input: string) {
-  const v = normalizeDriveRoot(input)
-  if (v === "/") return v
-  if (v === "//") return v
-  if (/^[A-Za-z]:\/$/.test(v)) return v
-  return v.replace(/\/+$/, "")
-}
-
-function joinPath(base: string | undefined, rel: string) {
-  const b = trimTrailing(base ?? "")
-  const r = trimTrailing(rel).replace(/^\/+/, "")
-  if (!b) return r
-  if (!r) return b
-  if (b.endsWith("/")) return b + r
-  return b + "/" + r
-}
-
-function rootOf(input: string) {
-  const v = normalizeDriveRoot(input)
-  if (v.startsWith("//")) return "//"
-  if (v.startsWith("/")) return "/"
-  if (/^[A-Za-z]:\//.test(v)) return v.slice(0, 3)
-  return ""
-}
-
-function parentOf(input: string) {
-  const v = trimTrailing(input)
-  if (v === "/") return v
-  if (v === "//") return v
-  if (/^[A-Za-z]:\/$/.test(v)) return v
-
-  const i = v.lastIndexOf("/")
-  if (i <= 0) return "/"
-  if (i === 2 && /^[A-Za-z]:/.test(v)) return v.slice(0, 3)
-  return v.slice(0, i)
-}
-
-function modeOf(input: string) {
-  const raw = normalizeDriveRoot(input.trim())
-  if (!raw) return "relative" as const
-  if (raw.startsWith("~")) return "tilde" as const
-  if (rootOf(raw)) return "absolute" as const
-  return "relative" as const
-}
-
-function tildeOf(absolute: string, home: string) {
-  const full = trimTrailing(absolute)
-  if (!home) return ""
-
-  const hn = trimTrailing(home)
-  const lc = full.toLowerCase()
-  const hc = hn.toLowerCase()
-  if (lc === hc) return "~"
-  if (lc.startsWith(hc + "/")) return "~" + full.slice(hn.length)
-  return ""
-}
 
 function displayPath(path: string, input: string, home: string) {
   const full = trimTrailing(path)
-  if (modeOf(input) === "absolute") return full
+  const raw = normalizeDriveRoot(input.trim())
+  const absolute = raw.startsWith("~") ? false : !!rootOf(raw)
+  if (absolute) return full
   return tildeOf(full, home) || full
 }
 
@@ -122,6 +81,7 @@ function useDirectorySearch(args: {
   home: () => string
 }) {
   const cache = new Map<string, Promise<Array<{ name: string; absolute: string }>>>()
+  let roots = undefined as Promise<string[]> | undefined
   let current = 0
 
   const scoped = (value: string) => {
@@ -168,6 +128,31 @@ function useDirectorySearch(args: {
     return fuzzysort.go(query, items, { key: "name", limit }).map((x) => x.obj.absolute)
   }
 
+  const searchRoots = (base: string) => {
+    const local = trimTrailing(base)
+    const root = driveRoot(local)
+    if (!root) return Promise.resolve([local])
+    if (roots) return roots
+
+    roots = Promise.all(
+      WINDOWS_DRIVES.map((letter) => {
+        const directory = `${letter}:/`
+        return args.sdk.client.file
+          .list({ directory, path: "" })
+          .then((x) => (x.data ? directory : ""))
+          .catch(() => "")
+      }),
+    ).then((items) => dedupe([root, ...items.filter(Boolean)]))
+
+    return roots
+  }
+
+  const find = (directory: string, query: string, limit: number) =>
+    args.sdk.client.find
+      .files({ directory, query, type: "directory", limit })
+      .then((x) => x.data ?? [])
+      .catch(() => [])
+
   return async (filter: string) => {
     const token = ++current
     const active = () => token === current
@@ -180,16 +165,22 @@ function useDirectorySearch(args: {
     const isPath = raw.startsWith("~") || !!rootOf(raw) || raw.includes("/")
     const query = normalizeDriveRoot(scopedInput.path)
 
-    const find = () =>
-      args.sdk.client.find
-        .files({ directory: scopedInput.directory, query, type: "directory", limit: 50 })
-        .then((x) => x.data ?? [])
-        .catch(() => [])
-
     if (!isPath) {
-      const results = await find()
+      const local = await find(scopedInput.directory, query, 50)
       if (!active()) return []
-      return results.map((rel) => joinPath(scopedInput.directory, rel)).slice(0, 50)
+      const localPaths = local.map((rel) => joinPath(scopedInput.directory, rel))
+      if (!query) return dedupe(localPaths).slice(0, 50)
+
+      const directories = await searchRoots(scopedInput.directory)
+      if (!active()) return []
+      if (directories.length <= 1) return dedupe(localPaths).slice(0, 50)
+
+      const perRoot = Math.max(8, Math.ceil(50 / directories.length))
+      const remote = await Promise.all(
+        directories.map((directory) => find(directory, query, perRoot).then((items) => items.map((rel) => joinPath(directory, rel)))),
+      )
+      if (!active()) return []
+      return dedupe([...localPaths, ...remote.flat()]).slice(0, 50)
     }
 
     const segments = query.replace(/^\/+/, "").split("/")
@@ -214,11 +205,11 @@ function useDirectorySearch(args: {
 
     const out = (await Promise.all(paths.map((p) => match(p, tail, 50)))).flat()
     if (!active()) return []
-    const deduped = Array.from(new Set(out))
+    const deduped = dedupe(out)
     const base = raw.startsWith("~") ? trimTrailing(scopedInput.directory) : ""
     const expand = !raw.endsWith("/")
     if (!expand || !tail) {
-      const items = base ? Array.from(new Set([base, ...deduped])) : deduped
+      const items = base ? dedupe([base, ...deduped]) : deduped
       return items.slice(0, 50)
     }
 
@@ -229,8 +220,8 @@ function useDirectorySearch(args: {
 
     const children = await match(target, "", 30)
     if (!active()) return []
-    const items = Array.from(new Set([...deduped, ...children]))
-    return (base ? Array.from(new Set([base, ...items])) : items).slice(0, 50)
+    const items = dedupe([...deduped, ...children])
+    return (base ? dedupe([base, ...items]) : items).slice(0, 50)
   }
 }
 

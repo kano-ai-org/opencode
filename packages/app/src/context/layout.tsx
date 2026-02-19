@@ -9,6 +9,13 @@ import { Project } from "@opencode-ai/sdk/v2"
 import { Persist, persisted, removePersisted } from "@/utils/persist"
 import { same } from "@/utils/same"
 import { createScrollPersistence, type SessionScroll } from "./layout-scroll"
+import {
+  applyWorkspaceToggles,
+  EMPTY_WORKSPACE_TOGGLES,
+  pickLocalWorkspaceToggles,
+  shouldSeedWorkspaceToggles,
+  type WorkspaceTogglesState,
+} from "./layout-workspaces-sync"
 
 const AVATAR_COLOR_KEYS = ["pink", "mint", "orange", "purple", "cyan", "lime"] as const
 const DEFAULT_PANEL_WIDTH = 344
@@ -389,6 +396,143 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       return directory
     }
 
+    const workspaceVersion = new Map<string, number>()
+    const workspaceLoaded = new Set<string>()
+    const workspaceLoading = new Set<string>()
+
+    const requestHeaders = (json = false) => {
+      const password = typeof window === "undefined" ? undefined : window.__OPENCODE__?.serverPassword
+      const auth = password && server.isLocal() ? { Authorization: `Basic ${btoa(`opencode:${password}`)}` } : undefined
+      return {
+        ...(json ? { "Content-Type": "application/json" } : undefined),
+        ...auth,
+      }
+    }
+
+    const parseWorkspaceState = (value: unknown): WorkspaceTogglesState => {
+      if (!isRecord(value)) return EMPTY_WORKSPACE_TOGGLES
+      const version = typeof value.version === "number" ? Math.max(0, Math.trunc(value.version)) : 0
+      const raw = isRecord(value.toggles) ? value.toggles : {}
+      const toggles = Object.entries(raw).reduce<Record<string, boolean>>((acc, [directory, enabled]) => {
+        if (typeof enabled !== "boolean") return acc
+        acc[directory] = enabled
+        return acc
+      }, {})
+      return { version, toggles }
+    }
+
+    const projectForWorkspace = (directory: string) =>
+      globalSync.data.project.find((project) => project.worktree === directory && project.id)
+
+    const applyProjectWorkspaceToggles = (
+      project: Pick<Project, "id" | "worktree" | "sandboxes">,
+      state: WorkspaceTogglesState,
+    ) => {
+      if (!project.id) return
+      workspaceVersion.set(project.id, state.version)
+      setStore("sidebar", "workspaces", (current) => applyWorkspaceToggles(project, current, state.toggles))
+    }
+
+    const getWorkspaceToggles = async (project: Pick<Project, "id" | "worktree">) => {
+      if (!project.id) return EMPTY_WORKSPACE_TOGGLES
+      const url = `${server.url}/project/${encodeURIComponent(project.id)}/workspace-toggles?directory=${encodeURIComponent(project.worktree)}`
+      const response = await fetch(url, {
+        method: "GET",
+        headers: requestHeaders(),
+      }).catch(() => undefined)
+      if (!response?.ok) return EMPTY_WORKSPACE_TOGGLES
+      const body = await response.json().catch(() => undefined)
+      if (!body) return EMPTY_WORKSPACE_TOGGLES
+      return parseWorkspaceState(body)
+    }
+
+    const patchWorkspaceToggles = async (
+      project: Pick<Project, "id" | "worktree">,
+      version: number,
+      toggles: Record<string, boolean>,
+    ) => {
+      if (!project.id) return
+      const url = `${server.url}/project/${encodeURIComponent(project.id)}/workspace-toggles?directory=${encodeURIComponent(project.worktree)}`
+      const response = await fetch(url, {
+        method: "PATCH",
+        headers: requestHeaders(true),
+        body: JSON.stringify({ version, toggles }),
+      }).catch(() => undefined)
+      if (!response) return
+      const body = await response.json().catch(() => undefined)
+      const state = parseWorkspaceState(body)
+      return {
+        status: response.status,
+        state,
+      }
+    }
+
+    const hydrateWorkspaceToggles = async (directory: string, force = false) => {
+      const project = projectForWorkspace(directory)
+      if (!project?.id) return
+      if (workspaceLoading.has(project.id)) return
+      if (!force && workspaceLoaded.has(project.id)) return
+
+      workspaceLoading.add(project.id)
+      try {
+        const remote = await getWorkspaceToggles(project)
+        const local = pickLocalWorkspaceToggles(project, store.sidebar.workspaces)
+
+        if (shouldSeedWorkspaceToggles(remote, local)) {
+          const seeded = await patchWorkspaceToggles(project, remote.version, local)
+          if (seeded?.status === 200) {
+            applyProjectWorkspaceToggles(project, seeded.state)
+            workspaceLoaded.add(project.id)
+            return
+          }
+        }
+
+        applyProjectWorkspaceToggles(project, remote)
+        workspaceLoaded.add(project.id)
+      } catch {
+        workspaceLoaded.add(project.id)
+      } finally {
+        workspaceLoading.delete(project.id)
+      }
+    }
+
+    const syncWorkspaceToggles = async (directory: string) => {
+      const project = projectForWorkspace(directory)
+      if (!project?.id) return
+
+      if (!workspaceLoaded.has(project.id)) await hydrateWorkspaceToggles(directory, true)
+
+      const version = workspaceVersion.get(project.id) ?? 0
+      const toggles = pickLocalWorkspaceToggles(project, store.sidebar.workspaces)
+      const result = await patchWorkspaceToggles(project, version, toggles)
+      if (!result) return
+
+      if (result.status === 200) {
+        applyProjectWorkspaceToggles(project, result.state)
+        return
+      }
+
+      if (result.status === 409) {
+        applyProjectWorkspaceToggles(project, result.state)
+        const retry = await patchWorkspaceToggles(
+          project,
+          result.state.version,
+          pickLocalWorkspaceToggles(project, store.sidebar.workspaces),
+        )
+        if (retry?.status === 200) {
+          applyProjectWorkspaceToggles(project, retry.state)
+        }
+      }
+    }
+
+    createEffect(() => {
+      if (!globalSync.ready) return
+      for (const project of globalSync.data.project) {
+        if (project.vcs !== "git") continue
+        void hydrateWorkspaceToggles(project.worktree)
+      }
+    })
+
     createEffect(() => {
       const projects = server.projects.list()
       const seen = new Set(projects.map((project) => project.worktree))
@@ -536,10 +680,12 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         },
         setWorkspaces(directory: string, value: boolean) {
           setStore("sidebar", "workspaces", directory, value)
+          void syncWorkspaceToggles(directory)
         },
         toggleWorkspaces(directory: string) {
           const current = store.sidebar.workspaces[directory] ?? store.sidebar.workspacesDefault ?? false
           setStore("sidebar", "workspaces", directory, !current)
+          void syncWorkspaceToggles(directory)
         },
       },
       terminal: {
