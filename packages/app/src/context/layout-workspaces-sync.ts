@@ -5,6 +5,12 @@ export type WorkspaceTogglesState = {
   toggles: Record<string, boolean>
 }
 
+const normalize = (directory: string) => {
+  const next = directory.replace(/\\/g, "/").replace(/\/+$/, "")
+  if (!/^[A-Za-z]:\//.test(next)) return next
+  return `${next.slice(0, 1).toUpperCase()}${next.slice(1).toLowerCase()}`
+}
+
 export const EMPTY_WORKSPACE_TOGGLES: WorkspaceTogglesState = {
   version: 0,
   toggles: {},
@@ -18,16 +24,16 @@ export function filterWorkspaceToggles(
   project: Pick<Project, "worktree" | "sandboxes">,
   toggles: Record<string, boolean>,
 ) {
-  const allowed = new Set(workspaceDirectories(project))
-  return Object.fromEntries(Object.entries(toggles).filter(([directory]) => allowed.has(directory)))
+  const allowed = new Set(workspaceDirectories(project).map(normalize))
+  return Object.fromEntries(Object.entries(toggles).filter(([directory]) => allowed.has(normalize(directory))))
 }
 
 export function pickLocalWorkspaceToggles(
   project: Pick<Project, "worktree" | "sandboxes">,
   map: Record<string, boolean>,
 ) {
-  const allowed = new Set(workspaceDirectories(project))
-  return Object.fromEntries(Object.entries(map).filter(([directory]) => allowed.has(directory)))
+  const allowed = new Set(workspaceDirectories(project).map(normalize))
+  return Object.fromEntries(Object.entries(map).filter(([directory]) => allowed.has(normalize(directory))))
 }
 
 export function applyWorkspaceToggles(
@@ -36,8 +42,13 @@ export function applyWorkspaceToggles(
   toggles: Record<string, boolean>,
 ) {
   const next = { ...current }
+  const normalized = Object.entries(toggles).reduce<Record<string, boolean>>((acc, [directory, value]) => {
+    acc[normalize(directory)] = value
+    return acc
+  }, {})
+
   for (const directory of workspaceDirectories(project)) {
-    const value = toggles[directory]
+    const value = toggles[directory] ?? normalized[normalize(directory)]
     if (value === undefined) {
       delete next[directory]
       continue

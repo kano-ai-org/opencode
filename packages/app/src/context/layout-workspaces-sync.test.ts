@@ -25,6 +25,40 @@ describe("layout workspace sync helpers", () => {
     })
   })
 
+  test("matches toggles across slash and drive-letter casing variants", () => {
+    const windowsProject = {
+      worktree: "D:/Work/Repo",
+      sandboxes: ["D:/Work/Repo/.sandbox"],
+    }
+
+    expect(
+      filterWorkspaceToggles(windowsProject, {
+        "d:\\work\\repo": true,
+        "d:/work/repo/.sandbox/": false,
+      }),
+    ).toEqual({
+      "d:\\work\\repo": true,
+      "d:/work/repo/.sandbox/": false,
+    })
+
+    expect(
+      applyWorkspaceToggles(
+        windowsProject,
+        {
+          "D:/Work/Repo": false,
+          "D:/Work/Repo/.sandbox": true,
+        },
+        {
+          "d:\\work\\repo": true,
+          "d:/work/repo/.sandbox/": false,
+        },
+      ),
+    ).toEqual({
+      "D:/Work/Repo": true,
+      "D:/Work/Repo/.sandbox": false,
+    })
+  })
+
   test("applies toggles by replacing project entries only", () => {
     const result = applyWorkspaceToggles(
       project,

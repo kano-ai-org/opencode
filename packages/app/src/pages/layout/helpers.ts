@@ -2,10 +2,14 @@ import { getFilename } from "@opencode-ai/util/path"
 import { type Session } from "@opencode-ai/sdk/v2/client"
 
 export const workspaceKey = (directory: string) => {
-  const drive = directory.match(/^([A-Za-z]:)[\\/]+$/)
-  if (drive) return `${drive[1]}${directory.includes("\\") ? "\\" : "/"}`
-  if (/^[\\/]+$/.test(directory)) return directory.includes("\\") ? "\\" : "/"
-  return directory.replace(/[\\/]+$/, "")
+  const normalized = directory.replace(/\\/g, "/")
+  const drive = normalized.match(/^([A-Za-z]:)\/+$/)
+  if (drive) return `${drive[1].toUpperCase()}/`
+  if (/^\/+$/i.test(normalized)) return "/"
+
+  const trimmed = normalized.replace(/\/+$/, "")
+  if (!/^[A-Za-z]:\//.test(trimmed)) return trimmed
+  return `${trimmed.slice(0, 1).toUpperCase()}${trimmed.slice(1).toLowerCase()}`
 }
 
 export function sortSessions(now: number) {

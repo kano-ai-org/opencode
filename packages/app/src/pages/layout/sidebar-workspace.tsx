@@ -40,6 +40,7 @@ export type WorkspaceSidebarContext = {
   clearHoverProjectSoon: () => void
   prefetchSession: (session: Session, priority?: "high" | "low") => void
   archiveSession: (session: Session) => Promise<void>
+  renameSession: (session: Session, next: string) => Promise<void>
   workspaceName: (directory: string, projectId?: string, branch?: string) => string | undefined
   renameWorkspace: (directory: string, next: string, projectId?: string, branch?: string) => void
   editorOpen: (id: string) => boolean
@@ -264,22 +265,26 @@ const WorkspaceSessionList = (props: {
     </Show>
     <For each={props.sessions()}>
       {(session) => (
-        <SessionItem
-          session={session}
-          slug={props.slug()}
-          mobile={props.mobile}
-          children={props.children()}
+          <SessionItem
+            session={session}
+            slug={props.slug()}
+            mobile={props.mobile}
+            children={props.children()}
           sidebarExpanded={props.ctx.sidebarExpanded}
           sidebarHovering={props.ctx.sidebarHovering}
           nav={props.ctx.nav}
           hoverSession={props.ctx.hoverSession}
           setHoverSession={props.ctx.setHoverSession}
-          clearHoverProjectSoon={props.ctx.clearHoverProjectSoon}
-          prefetchSession={props.ctx.prefetchSession}
-          archiveSession={props.ctx.archiveSession}
-        />
-      )}
-    </For>
+            clearHoverProjectSoon={props.ctx.clearHoverProjectSoon}
+            prefetchSession={props.ctx.prefetchSession}
+            archiveSession={props.ctx.archiveSession}
+            renameSession={props.ctx.renameSession}
+            editorOpen={props.ctx.editorOpen}
+            openEditor={props.ctx.openEditor}
+            InlineEditor={props.ctx.InlineEditor}
+          />
+        )}
+      </For>
     <Show when={props.hasMore()}>
       <div class="relative w-full py-1">
         <Button
@@ -509,6 +514,10 @@ export const LocalWorkspace = (props: {
               clearHoverProjectSoon={props.ctx.clearHoverProjectSoon}
               prefetchSession={props.ctx.prefetchSession}
               archiveSession={props.ctx.archiveSession}
+              renameSession={props.ctx.renameSession}
+              editorOpen={props.ctx.editorOpen}
+              openEditor={props.ctx.openEditor}
+              InlineEditor={props.ctx.InlineEditor}
             />
           )}
         </For>

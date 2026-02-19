@@ -1,5 +1,5 @@
 import { createStore, produce } from "solid-js/store"
-import { batch, createEffect, createMemo, onCleanup, onMount, type Accessor } from "solid-js"
+import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor } from "solid-js"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { useGlobalSync } from "./global-sync"
 import { useGlobalSDK } from "./global-sdk"
@@ -400,6 +400,19 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     const workspaceLoaded = new Set<string>()
     const workspaceLoading = new Set<string>()
     const workspacePendingSync = new Set<string>()
+    const [workspacePendingTick, setWorkspacePendingTick] = createSignal(0)
+
+    const queueWorkspacePendingSync = (directory: string) => {
+      if (workspacePendingSync.has(directory)) return
+      workspacePendingSync.add(directory)
+      setWorkspacePendingTick((value) => value + 1)
+    }
+
+    const clearWorkspacePendingSync = (directory: string) => {
+      if (!workspacePendingSync.has(directory)) return
+      workspacePendingSync.delete(directory)
+      setWorkspacePendingTick((value) => value + 1)
+    }
 
     const requestHeaders = (json = false) => {
       const password = typeof window === "undefined" ? undefined : window.__OPENCODE__?.serverPassword
@@ -422,8 +435,20 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       return { version, toggles }
     }
 
-    const projectForWorkspace = (directory: string) =>
-      globalSync.data.project.find((project) => project.worktree === directory && project.id)
+    const projectForWorkspace = (directory: string) => {
+      const worktree = rootFor(directory)
+      const project = globalSync.data.project.find((item) => item.worktree === worktree)
+      if (project?.id) return project
+
+      const [child] = globalSync.child(worktree, { bootstrap: true })
+      if (!child.project) return
+
+      return {
+        id: child.project,
+        worktree,
+        sandboxes: project?.sandboxes ?? [],
+      }
+    }
 
     const applyProjectWorkspaceToggles = (
       project: Pick<Project, "id" | "worktree" | "sandboxes">,
@@ -500,11 +525,11 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     const syncWorkspaceToggles = async (directory: string) => {
       const project = projectForWorkspace(directory)
       if (!project?.id) {
-        workspacePendingSync.add(directory)
+        queueWorkspacePendingSync(directory)
         return
       }
 
-      workspacePendingSync.delete(directory)
+      clearWorkspacePendingSync(directory)
 
       if (!workspaceLoaded.has(project.id)) await hydrateWorkspaceToggles(directory, true)
 
@@ -533,10 +558,11 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
 
     createEffect(() => {
       if (!globalSync.ready) return
+      workspacePendingTick()
       for (const directory of Array.from(workspacePendingSync)) {
         const project = projectForWorkspace(directory)
         if (!project?.id) continue
-        workspacePendingSync.delete(directory)
+        clearWorkspacePendingSync(directory)
         void syncWorkspaceToggles(directory)
       }
     })
@@ -545,6 +571,13 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       if (!globalSync.ready) return
       for (const project of globalSync.data.project) {
         if (project.vcs !== "git") continue
+        void hydrateWorkspaceToggles(project.worktree)
+      }
+    })
+
+    createEffect(() => {
+      if (!globalSync.ready) return
+      for (const project of server.projects.list()) {
         void hydrateWorkspaceToggles(project.worktree)
       }
     })

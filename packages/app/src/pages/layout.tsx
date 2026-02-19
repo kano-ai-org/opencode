@@ -910,6 +910,28 @@ export default function Layout(props: ParentProps) {
     }
   }
 
+  async function renameSession(session: Session, next: string) {
+    const title = next.trim()
+    if (!title) return
+    if (title === session.title) return
+
+    await globalSDK.client.session.update({
+      directory: session.directory,
+      sessionID: session.id,
+      title,
+    })
+
+    const [store, setStore] = globalSync.child(session.directory)
+    if (!store.session.find((item) => item.id === session.id)) return
+    setStore(
+      produce((draft) => {
+        const match = Binary.search(draft.session, session.id, (item) => item.id)
+        if (!match.found) return
+        draft.session[match.index].title = title
+      }),
+    )
+  }
+
   command.register("layout", () => {
     const commands: CommandOption[] = [
       {
@@ -1463,6 +1485,28 @@ export default function Layout(props: ParentProps) {
     ),
   )
 
+  createEffect(
+    on(
+      () => ({ ready: pageReady(), dir: params.dir, id: params.id, projects: layout.projects.list() }),
+      (value) => {
+        if (!value.ready) return
+        if (!value.dir) return
+
+        const directory = decode64(value.dir)
+        if (!directory) return
+
+        const known = value.projects.flatMap((project) => [project.worktree, ...(project.sandboxes ?? [])])
+        const canonical = known.find((item) => workspaceKey(item) === workspaceKey(directory))
+        if (!canonical) return
+        if (canonical === directory) return
+
+        const href = `/${base64Encode(canonical)}${value.id ? `/session/${value.id}` : ""}`
+        navigate(href, { replace: true })
+      },
+      { defer: true },
+    ),
+  )
+
   createEffect(() => {
     const sidebarWidth = layout.sidebar.opened() ? layout.sidebar.width() : 48
     document.documentElement.style.setProperty("--dialog-left-margin", `${sidebarWidth}px`)
@@ -1538,13 +1582,14 @@ export default function Layout(props: ParentProps) {
     const pending = extra ? WorktreeState.get(extra)?.status === "pending" : false
 
     const existing = store.workspaceOrder[project.worktree]
-    if (!existing) return extra ? [...dirs, extra] : dirs
+    if (!existing) {
+      if (!extra || !pending) return dirs
+      return [local, extra, ...dirs.filter((directory) => directory !== local)]
+    }
 
     const merged = syncWorkspaceOrder(local, dirs, existing)
-    if (pending && extra) return [local, extra, ...merged.filter((directory) => directory !== local)]
-    if (!extra) return merged
-    if (pending) return merged
-    return [...merged, extra]
+    if (!extra || !pending) return merged
+    return [local, extra, ...merged.filter((directory) => directory !== local)]
   }
 
   const sidebarProject = createMemo(() => {
@@ -1635,6 +1680,7 @@ export default function Layout(props: ParentProps) {
     clearHoverProjectSoon,
     prefetchSession,
     archiveSession,
+    renameSession,
     workspaceName,
     renameWorkspace,
     editorOpen,
@@ -1680,6 +1726,10 @@ export default function Layout(props: ParentProps) {
       clearHoverProjectSoon,
       prefetchSession,
       archiveSession,
+      renameSession,
+      editorOpen,
+      openEditor,
+      InlineEditor,
     },
     setHoverSession,
   }
