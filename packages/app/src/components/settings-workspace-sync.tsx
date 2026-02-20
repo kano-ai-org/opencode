@@ -33,6 +33,16 @@ const displayDirectory = (worktree: string) => {
   return worktree
 }
 
+const isSubagent = (session: { title: string; parentID?: string }) => {
+  if (session.parentID) return true
+  return /(^|\s)@\w+\s+subagent(\s|$)/i.test(session.title)
+}
+
+const time = (value?: number) => {
+  if (!value) return "-"
+  return new Date(value).toLocaleString()
+}
+
 export const SettingsWorkspaceSync: Component = () => {
   const layout = useLayout()
   const language = useLanguage()
@@ -46,6 +56,7 @@ export const SettingsWorkspaceSync: Component = () => {
   })
   const [detail, setDetail] = createStore({
     worktree: "",
+    showSubagent: false,
   })
   let upload: HTMLInputElement | undefined
 
@@ -181,12 +192,19 @@ export const SettingsWorkspaceSync: Component = () => {
 
   const detailRows = createMemo(() => {
     if (!detail.worktree) return []
-    return rows().find((row) => row.worktree === detail.worktree)?.sessions ?? []
+    const values = rows().find((row) => row.worktree === detail.worktree)?.sessions ?? []
+    if (detail.showSubagent) return values
+    return values.filter((session) => !isSubagent(session))
   })
   const detailSummary = createMemo(() => ({
     active: detailRows().filter((x) => !x.archived).length,
     archived: detailRows().filter((x) => x.archived).length,
   }))
+  const detailHidden = createMemo(() => {
+    if (!detail.worktree) return 0
+    const values = rows().find((row) => row.worktree === detail.worktree)?.sessions ?? []
+    return values.filter((session) => isSubagent(session)).length
+  })
   const currentSessionID = createMemo(() => location.pathname.match(/\/session\/([^/]+)/)?.[1] ?? "")
   const [currentSession] = createResource(currentSessionID, async (id) => {
     if (!id) return
@@ -250,11 +268,11 @@ export const SettingsWorkspaceSync: Component = () => {
   }
 
   const openDetail = (worktree: string) => {
-    setDetail({ worktree })
+    setDetail({ worktree, showSubagent: false })
   }
 
   const backToTab = () => {
-    setDetail({ worktree: "" })
+    setDetail({ worktree: "", showSubagent: false })
   }
 
   const removeSession = (id: string) => {
@@ -330,6 +348,16 @@ export const SettingsWorkspaceSync: Component = () => {
                   <div class="text-11-regular text-text-weak">
                     {detailRows().length} session(s) | active: {detailSummary().active} | archived: {detailSummary().archived}
                   </div>
+                  <div class="flex items-center gap-2">
+                    <Button
+                      variant="secondary"
+                      size="small"
+                      class="min-h-8 px-3"
+                      onClick={() => setDetail("showSubagent", (value) => !value)}
+                    >
+                      {detail.showSubagent ? "Hide subagent sessions" : `Show subagent sessions (${detailHidden()})`}
+                    </Button>
+                  </div>
                   <Show when={currentSession()}>
                     {(session) => {
                       const entry = session()
@@ -360,7 +388,11 @@ export const SettingsWorkspaceSync: Component = () => {
                       <div class="border border-border-weak-base rounded-lg p-3 bg-surface-raised-base flex items-center justify-between gap-3">
                         <div class="min-w-0">
                           <div class="text-12-medium text-text-strong break-all">{session.title}</div>
-                          <div class="text-11-regular text-text-weak">{session.archived ? "archived" : "active"}</div>
+                          <div class="text-11-regular text-text-weak">
+                            {session.archived ? "archived" : "active"} | {isSubagent(session) ? "subagent" : "human"}
+                          </div>
+                          <div class="text-11-regular text-text-weak">created: {time(session.created)}</div>
+                          <div class="text-11-regular text-text-weak">archived: {time(session.archivedAt)}</div>
                           <div class="text-11-regular text-text-weak break-all">{session.id}</div>
                         </div>
                         <div class="flex gap-2">

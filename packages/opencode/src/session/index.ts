@@ -512,6 +512,7 @@ export namespace Session {
   )
 
   export function* list(input?: {
+    projectID?: string
     directory?: string
     roots?: boolean
     start?: number
@@ -519,7 +520,7 @@ export namespace Session {
     limit?: number
   }) {
     const project = Instance.project
-    const conditions = [eq(SessionTable.project_id, project.id)]
+    const conditions = [eq(SessionTable.project_id, input?.projectID ?? project.id)]
 
     if (input?.directory) {
       const key = pathkey(input.directory)

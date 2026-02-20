@@ -95,7 +95,7 @@ type WorkspaceKeySnapshot = {
   missingPaths: string[]
   pathStatus: "ok" | "missing" | "unresolved"
   sessionCount: number
-  sessions: { id: string; title: string; directory: string; updated: number; archived: boolean }[]
+  sessions: { id: string; title: string; directory: string; parentID?: string; created: number; updated: number; archived: boolean; archivedAt?: number }[]
 }
 
 type TabHandoff = {
@@ -958,14 +958,14 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
                 .filter((key) => workspaceMatch(key, worktree))
                 .sort((a, b) => a.localeCompare(b))
               const remoteKeys = Object.keys(remote.toggles).sort((a, b) => a.localeCompare(b))
-              const sessions = await fetch(`${server.url}/session?limit=300`, {
+              const sessions = await fetch(`${server.url}/session?projectID=${encodeURIComponent(project.id)}&limit=300`, {
                 headers: requestHeaders(),
               })
                 .then(async (response) => {
-                  if (!response.ok) return [] as { id: string; title: string; directory: string; time?: { updated?: number; archived?: number } }[]
+                  if (!response.ok) return [] as { id: string; title: string; directory: string; parentID?: string; time?: { created?: number; updated?: number; archived?: number } }[]
                   const body = await response.json().catch(() => undefined)
-                  if (!Array.isArray(body)) return [] as { id: string; title: string; directory: string; time?: { updated?: number; archived?: number } }[]
-                  return body as { id: string; title: string; directory: string; time?: { updated?: number; archived?: number } }[]
+                  if (!Array.isArray(body)) return [] as { id: string; title: string; directory: string; parentID?: string; time?: { created?: number; updated?: number; archived?: number } }[]
+                  return body as { id: string; title: string; directory: string; parentID?: string; time?: { created?: number; updated?: number; archived?: number } }[]
                 })
                 .then((rows) =>
                   rows
@@ -975,8 +975,11 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
                       id: row.id,
                       title: row.title,
                       directory: row.directory,
+                      parentID: row.parentID,
+                      created: typeof row.time?.created === "number" ? row.time.created : 0,
                       updated: typeof row.time?.updated === "number" ? row.time.updated : 0,
                       archived: typeof row.time?.archived === "number",
+                      archivedAt: typeof row.time?.archived === "number" ? row.time.archived : undefined,
                     }))
                     .sort((a, b) => b.updated - a.updated),
                 )
