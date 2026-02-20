@@ -58,4 +58,45 @@ describe("Project workspace toggles", () => {
       [project.worktree]: true,
     })
   })
+
+  test("accepts separator variants for project worktree toggle", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const { project } = await Project.fromDirectory(tmp.path)
+
+    const variant = project.worktree.includes("/")
+      ? project.worktree.replaceAll("/", "\\")
+      : project.worktree.replaceAll("\\", "/")
+
+    const updated = await Project.updateWorkspaceToggles({
+      projectID: project.id,
+      version: 0,
+      toggles: {
+        [variant]: true,
+      },
+    })
+
+    expect(updated.status).toBe(200)
+    expect(updated.data.toggles).toEqual({
+      [project.worktree]: true,
+    })
+  })
+
+  test("accepts lowercased slash-normalized worktree toggle", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const { project } = await Project.fromDirectory(tmp.path)
+
+    const variant = project.worktree.replaceAll("\\", "/").toLowerCase()
+    const updated = await Project.updateWorkspaceToggles({
+      projectID: project.id,
+      version: 0,
+      toggles: {
+        [variant]: true,
+      },
+    })
+
+    expect(updated.status).toBe(200)
+    expect(updated.data.toggles).toEqual({
+      [project.worktree]: true,
+    })
+  })
 })

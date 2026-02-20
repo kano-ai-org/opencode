@@ -10,6 +10,7 @@ Log.init({ print: false })
 
 const gitModule = await import("../../src/util/git")
 const originalGit = gitModule.git
+const norm = (value: string) => value.replace(/\\/g, "/").toLowerCase()
 
 type Mode = "none" | "rev-list-fail" | "top-fail" | "common-dir-fail"
 let mode: Mode = "none"
@@ -107,7 +108,7 @@ describe("Project.fromDirectory", () => {
       const { project } = await p.fromDirectory(tmp.path)
       expect(project.vcs).toBe("git")
       expect(project.id).toBe("global")
-      expect(project.worktree).toBe(tmp.path)
+      expect(norm(project.worktree)).toBe(norm(tmp.path))
     })
   })
 
@@ -118,7 +119,7 @@ describe("Project.fromDirectory", () => {
     await withMode("top-fail", async () => {
       const { project, sandbox } = await p.fromDirectory(tmp.path)
       expect(project.vcs).toBe("git")
-      expect(project.worktree).toBe(tmp.path)
+      expect(norm(project.worktree)).toBe(norm(tmp.path))
       expect(sandbox).toBe(tmp.path)
     })
   })
@@ -130,7 +131,7 @@ describe("Project.fromDirectory", () => {
     await withMode("common-dir-fail", async () => {
       const { project, sandbox } = await p.fromDirectory(tmp.path)
       expect(project.vcs).toBe("git")
-      expect(project.worktree).toBe(tmp.path)
+      expect(norm(project.worktree)).toBe(norm(tmp.path))
       expect(sandbox).toBe(tmp.path)
     })
   })
@@ -158,7 +159,7 @@ describe("Project.fromDirectory with worktrees", () => {
 
       const { project, sandbox } = await p.fromDirectory(worktreePath)
 
-      expect(project.worktree).toBe(tmp.path)
+      expect(norm(project.worktree)).toBe(norm(tmp.path))
       expect(sandbox).toBe(worktreePath)
       expect(project.sandboxes).toContain(worktreePath)
       expect(project.sandboxes).not.toContain(tmp.path)
@@ -183,7 +184,7 @@ describe("Project.fromDirectory with worktrees", () => {
       await p.fromDirectory(worktree1)
       const { project } = await p.fromDirectory(worktree2)
 
-      expect(project.worktree).toBe(tmp.path)
+      expect(norm(project.worktree)).toBe(norm(tmp.path))
       expect(project.sandboxes).toContain(worktree1)
       expect(project.sandboxes).toContain(worktree2)
       expect(project.sandboxes).not.toContain(tmp.path)
@@ -343,5 +344,20 @@ describe("Project.update", () => {
     expect(updated.icon?.url).toBe("https://example.com/favicon.ico")
     expect(updated.icon?.color).toBe("#00ff00")
     expect(updated.commands?.start).toBe("make start")
+  })
+})
+
+describe("Project.remove", () => {
+  test("deletes project row", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const { project } = await Project.fromDirectory(tmp.path)
+
+    const result = await Project.remove({ projectID: project.id })
+    expect(result).toBe(true)
+    expect(Project.get(project.id)).toBeUndefined()
+  })
+
+  test("rejects deleting global project", async () => {
+    await expect(Project.remove({ projectID: "global" })).rejects.toThrow("cannot delete global project")
   })
 })

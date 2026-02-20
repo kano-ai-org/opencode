@@ -48,7 +48,13 @@ export const ProjectRoutes = lazy(() =>
           },
         },
       }),
+      validator("query", z.object({ directory: z.string().optional() })),
       async (c) => {
+        const directory = c.req.valid("query").directory
+        if (directory) {
+          const { project } = await Project.fromDirectory(directory)
+          return c.json(project)
+        }
         return c.json(Instance.project)
       },
     )
@@ -77,6 +83,31 @@ export const ProjectRoutes = lazy(() =>
         const body = c.req.valid("json")
         const project = await Project.update({ ...body, projectID })
         return c.json(project)
+      },
+    )
+    .delete(
+      "/:projectID",
+      describeRoute({
+        summary: "Delete project",
+        description: "Delete a project and cascade delete dependent data such as sessions.",
+        operationId: "project.delete",
+        responses: {
+          200: {
+            description: "Project deleted",
+            content: {
+              "application/json": {
+                schema: resolver(z.boolean()),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator("param", z.object({ projectID: z.string() })),
+      async (c) => {
+        const projectID = c.req.valid("param").projectID
+        await Project.remove({ projectID })
+        return c.json(true)
       },
     )
     .get(

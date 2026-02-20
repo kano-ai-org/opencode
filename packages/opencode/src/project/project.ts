@@ -12,6 +12,7 @@ import { BusEvent } from "@/bus/bus-event"
 import { iife } from "@/util/iife"
 import { GlobalBus } from "@/bus/global"
 import { existsSync } from "fs"
+import { realpath } from "fs/promises"
 import { git } from "../util/git"
 
 export namespace Project {
@@ -67,9 +68,56 @@ export namespace Project {
 
   type Row = typeof ProjectTable.$inferSelect
 
+  const pathkey = (directory: string) => {
+    const normalized = directory.replace(/\\/g, "/").replace(/\/+$/, "")
+    if (!/^[A-Za-z]:\//.test(normalized)) return normalized
+    return `${normalized.slice(0, 1).toUpperCase()}${normalized.slice(1).toLowerCase()}`
+  }
+
+  const canonical = (directory: string) =>
+    realpath(directory)
+      .then(pathkey)
+      .catch(() => pathkey(directory))
+
   const sanitizeWorkspaceToggles = (row: Row, toggles: Record<string, boolean>) => {
     const allowed = new Set([row.worktree, ...row.sandboxes])
     return Object.fromEntries(Object.entries(toggles).filter(([directory]) => allowed.has(directory)))
+  }
+
+  const sanitizeWorkspaceTogglesInput = async (row: Row, toggles: Record<string, boolean>) => {
+    const allowed = [row.worktree, ...row.sandboxes]
+    const aliases = await Promise.all(allowed.map((directory) => canonical(directory).then((key) => [key, directory] as const)))
+    const map = new Map(aliases)
+    const direct = new Map(allowed.map((directory) => [pathkey(directory), directory] as const))
+    const tail = allowed.reduce<Map<string, string | undefined>>((acc, directory) => {
+      const name = path.basename(directory.replace(/\\/g, "/")).toLowerCase()
+      if (!name) return acc
+      if (!acc.has(name)) {
+        acc.set(name, directory)
+        return acc
+      }
+      acc.set(name, undefined)
+      return acc
+    }, new Map())
+
+    const resolved = await Promise.all(
+      Object.entries(toggles).map(async ([directory, enabled]) => {
+        const key = await canonical(directory)
+        const byCanonical = map.get(key)
+        if (byCanonical) return [byCanonical, enabled] as const
+
+        const byDirect = direct.get(pathkey(directory))
+        if (byDirect) return [byDirect, enabled] as const
+
+        const name = path.basename(directory.replace(/\\/g, "/")).toLowerCase()
+        const byTail = tail.get(name)
+        const target = byTail && allowed.includes(byTail) ? byTail : undefined
+        if (!target) return
+        return [target, enabled] as const
+      }),
+    )
+
+    return Object.fromEntries(resolved.filter((item): item is readonly [string, boolean] => !!item))
   }
 
   const workspaceTogglesFromRow = (row: Row) => {
@@ -407,6 +455,17 @@ export namespace Project {
     },
   )
 
+  export const remove = fn(z.object({ projectID: z.string() }), async ({ projectID }) => {
+    if (projectID === "global") {
+      throw new Error("cannot delete global project")
+    }
+
+    const removed = Database.use((db) => db.delete(ProjectTable).where(eq(ProjectTable.id, projectID)).returning().get())
+    if (!removed) throw new NotFoundError({ message: `Project not found: ${projectID}` })
+
+    return true
+  })
+
   export function getWorkspaceToggles(projectID: string) {
     const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, projectID)).get())
     if (!row) {
@@ -429,7 +488,7 @@ export namespace Project {
       }
     }
 
-    const toggles = sanitizeWorkspaceToggles(row, input.toggles)
+    const toggles = await sanitizeWorkspaceTogglesInput(row, input.toggles)
     const nextVersion = current.version + 1
     const updated = Database.use((db) =>
       db

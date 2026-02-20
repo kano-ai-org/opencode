@@ -49,4 +49,17 @@ describe("project workspace toggles routes", () => {
       toggles: { [project.worktree]: true },
     })
   })
+
+  test("deletes project", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const { project } = await Project.fromDirectory(tmp.path)
+    const app = Server.App()
+
+    const response = await app.request(`/project/${project.id}`, { method: "DELETE" })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toBe(true)
+
+    const after = await app.request(`/project/${project.id}/workspace-toggles`)
+    expect(after.status).toBe(404)
+  })
 })
