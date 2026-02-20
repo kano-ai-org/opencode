@@ -5,7 +5,7 @@ import { Component, For, Show, createMemo, createResource, createSignal } from "
 import { createStore } from "solid-js/store"
 import { useLayout } from "@/context/layout"
 import { useLanguage } from "@/context/language"
-import { useNavigate } from "@solidjs/router"
+import { useLocation, useNavigate } from "@solidjs/router"
 import { base64Encode } from "@opencode-ai/util/encode"
 import { useServer } from "@/context/server"
 import { TextField } from "@opencode-ai/ui/text-field"
@@ -36,6 +36,7 @@ export const SettingsWorkspaceSync: Component = () => {
   const layout = useLayout()
   const language = useLanguage()
   const navigate = useNavigate()
+  const location = useLocation()
   const server = useServer()
   const [tick, setTick] = createSignal(0)
   const [transfer, setTransfer] = createStore({
@@ -185,6 +186,15 @@ export const SettingsWorkspaceSync: Component = () => {
     active: detailRows().filter((x) => !x.archived).length,
     archived: detailRows().filter((x) => x.archived).length,
   }))
+  const currentSessionID = createMemo(() => location.pathname.match(/\/session\/([^/]+)/)?.[1] ?? "")
+  const [currentSession] = createResource(currentSessionID, async (id) => {
+    if (!id) return
+    const response = await fetch(`${server.url}/session/${encodeURIComponent(id)}`, { headers: headers() }).catch(() => undefined)
+    if (!response?.ok) return
+    return (await response.json().catch(() => undefined)) as
+      | { id: string; directory: string; title: string; time?: { archived?: number } }
+      | undefined
+  })
 
   const copyDiagnostics = () => {
     const value = diagnostics()
@@ -312,6 +322,22 @@ export const SettingsWorkspaceSync: Component = () => {
                   <div class="text-11-regular text-text-weak">
                     {detailRows().length} session(s) | active: {detailSummary().active} | archived: {detailSummary().archived}
                   </div>
+                  <Show when={currentSession()}>
+                    {(session) => {
+                      const entry = session()
+                      const inWorkspace = detailRows().some((item) => item.id === entry.id)
+                      return (
+                        <div class="border border-border-weak-base rounded-lg p-3 bg-surface-raised-base">
+                          <div class="text-12-medium text-text-strong">Current URL session</div>
+                          <div class="text-11-regular text-text-weak break-all">{entry.id}</div>
+                          <div class="text-11-regular text-text-weak break-all">directory: {entry.directory}</div>
+                          <div class="text-11-regular text-text-weak">
+                            state: {typeof entry.time?.archived === "number" ? "archived" : "active"} | in this workspace list: {String(inWorkspace)}
+                          </div>
+                        </div>
+                      )
+                    }}
+                  </Show>
                   <For each={detailRows()}>
                     {(session) => (
                       <div class="border border-border-weak-base rounded-lg p-3 bg-surface-raised-base flex items-center justify-between gap-3">

@@ -12,11 +12,13 @@ function git(command: string, fallback: string) {
 
 const gitBranch = git("git rev-parse --abbrev-ref HEAD", "unknown")
 const gitRevision = git("git rev-parse --short HEAD", "unknown")
+const gitRevisionNumber = git("git rev-list --count HEAD", "unknown")
 
 export default defineConfig({
   define: {
     "import.meta.env.VITE_APP_GIT_BRANCH": JSON.stringify(gitBranch),
     "import.meta.env.VITE_APP_GIT_REVISION": JSON.stringify(gitRevision),
+    "import.meta.env.VITE_APP_GIT_REVISION_NUMBER": JSON.stringify(gitRevisionNumber),
   },
   plugins: [desktopPlugin] as any,
   server: {

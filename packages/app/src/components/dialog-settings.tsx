@@ -16,6 +16,7 @@ export const DialogSettings: Component = () => {
   const platform = usePlatform()
   const branch = import.meta.env.VITE_APP_GIT_BRANCH || "unknown"
   const revision = import.meta.env.VITE_APP_GIT_REVISION || "unknown"
+  const revisionNumber = import.meta.env.VITE_APP_GIT_REVISION_NUMBER || "unknown"
 
   return (
     <Dialog size="x-large" transition>
@@ -65,6 +66,7 @@ export const DialogSettings: Component = () => {
               <span>{language.t("app.name.desktop")}</span>
               <span class="text-11-regular">v{platform.version}</span>
               <span class="text-11-regular">{branch}</span>
+              <span class="text-11-regular">rev#{revisionNumber}</span>
               <span class="text-11-regular">{revision}</span>
             </div>
           </div>
