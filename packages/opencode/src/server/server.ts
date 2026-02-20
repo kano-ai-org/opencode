@@ -540,12 +540,13 @@ export namespace Server {
         )
         .all("/*", async (c) => {
           const path = c.req.path
+          const ui = (Flag.OPENCODE_WEB_UI_ORIGIN || "https://app.opencode.ai").replace(/\/+$/, "")
 
-          const response = await proxy(`https://app.opencode.ai${path}`, {
+          const response = await proxy(`${ui}${path}`, {
             ...c.req,
             headers: {
               ...c.req.raw.headers,
-              host: "app.opencode.ai",
+              host: new URL(ui).host,
             },
           })
           response.headers.set(
