@@ -12,7 +12,7 @@ function git(command: string, fallback: string) {
 
 const gitBranch = git("git rev-parse --abbrev-ref HEAD", "unknown")
 const gitRevision = git("git rev-parse --short HEAD", "unknown")
-const gitRevisionNumber = git("git rev-list --count HEAD", "unknown")
+const gitRevisionNumber = git("git rev-list --count --first-parent HEAD", "unknown")
 
 export default defineConfig({
   define: {
