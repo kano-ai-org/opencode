@@ -1,4 +1,4 @@
-import { createResource, createEffect, createMemo, onCleanup, Show } from "solid-js"
+import { createResource, createEffect, createMemo, onCleanup, Show, For } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { Dialog } from "@opencode-ai/ui/dialog"
@@ -44,6 +44,31 @@ function showRequestError(language: ReturnType<typeof useLanguage>, err: unknown
     title: language.t("common.requestFailed"),
     description: err instanceof Error ? err.message : String(err),
   })
+}
+
+function connectError(language: ReturnType<typeof useLanguage>, reason?: string) {
+  const fallback = language.t("dialog.server.add.error")
+  if (!reason) return fallback
+  const lower = reason.toLowerCase()
+  if (lower.includes("fetch") || lower.includes("cors") || lower.includes("network")) {
+    return `${fallback} (network/CORS)`
+  }
+  if (lower.includes("401") || lower.includes("403") || lower.includes("unauthorized") || lower.includes("forbidden")) {
+    return `${fallback} (auth)`
+  }
+  if (lower.includes("timeout") || lower.includes("aborted")) {
+    return `${fallback} (timeout)`
+  }
+  return `${fallback} (${reason})`
+}
+
+function diagnostic(url: string, status?: ServerHealth, id?: string) {
+  const current = typeof window === "undefined" ? "n/a" : window.location.origin
+  const lines = [`target=${url}`, `origin=${current}`]
+  if (id) lines.push(`instance=${id}`)
+  if (typeof status?.statusCode === "number") lines.push(`status=${status.statusCode}`)
+  if (status?.reason) lines.push(`reason=${status.reason}`)
+  return lines.join(" | ")
 }
 
 function useDefaultServer(platform: ReturnType<typeof usePlatform>, language: ReturnType<typeof useLanguage>) {
@@ -252,6 +277,12 @@ export function DialogSelectServer() {
     })
   })
 
+  const failed = createMemo(() =>
+    sortedItems()
+      .map((url) => ({ url, status: store.status[url] }))
+      .filter((item) => item.status?.healthy === false),
+  )
+
   async function refreshHealth() {
     const results: Record<string, ServerHealth> = {}
     await Promise.all(
@@ -315,7 +346,7 @@ export function DialogSelectServer() {
     setStore("addServer", { adding: false })
 
     if (!result.healthy) {
-      setStore("addServer", { error: language.t("dialog.server.add.error") })
+      setStore("addServer", { error: connectError(language, result.reason) })
       return
     }
 
@@ -342,7 +373,7 @@ export function DialogSelectServer() {
     setStore("editServer", { busy: false })
 
     if (!result.healthy) {
-      setStore("editServer", { error: language.t("dialog.server.add.error") })
+      setStore("editServer", { error: connectError(language, result.reason) })
       return
     }
 
@@ -531,6 +562,21 @@ export function DialogSelectServer() {
             {store.addServer.adding ? language.t("dialog.server.add.checking") : language.t("dialog.server.add.button")}
           </Button>
         </div>
+
+        <Show when={failed().length > 0}>
+          <div class="px-5 pb-5">
+            <div class="border border-border-critical-base rounded-md bg-surface-critical-weak p-3 flex flex-col gap-2">
+              <div class="text-12-medium text-text-critical-base">Connection diagnostics</div>
+              <For each={failed()}>
+                {(item) => (
+                  <div class="text-11-regular text-text-critical-base break-all">
+                    {diagnostic(item.url, item.status, server.identityOf(item.url))}
+                  </div>
+                )}
+              </For>
+            </div>
+          </div>
+        </Show>
       </div>
     </Dialog>
   )

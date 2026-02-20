@@ -8,6 +8,17 @@ import { checkServerHealth } from "@/utils/server-health"
 type StoredProject = { worktree: string; expanded: boolean }
 const HEALTH_POLL_INTERVAL_MS = 10_000
 
+type Identity = { instanceID: string }
+
+function isLocalUrl(input: string) {
+  try {
+    const url = new URL(input)
+    return url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1"
+  } catch {
+    return false
+  }
+}
+
 export function normalizeServerUrl(input: string) {
   const trimmed = input.trim()
   if (!trimmed) return
@@ -20,10 +31,12 @@ export function serverDisplayName(url: string) {
   return url.replace(/^https?:\/\//, "").replace(/\/+$/, "")
 }
 
+function identityKey(id: string) {
+  return `instance:${id}`
+}
+
 function projectsKey(url: string) {
   if (!url) return ""
-  const host = url.replace(/^https?:\/\//, "").split(":")[0]
-  if (host === "localhost" || host === "127.0.0.1") return "local"
   return url
 }
 
@@ -33,10 +46,12 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     const platform = usePlatform()
 
     const [store, setStore, _, ready] = persisted(
-      Persist.global("server", ["server.v3"]),
+      Persist.global("server", ["server.v4"]),
       createStore({
         list: [] as string[],
         currentSidecarUrl: "",
+        identity: {} as Record<string, string>,
+        identityError: {} as Record<string, string>,
         projects: {} as Record<string, StoredProject[]>,
         lastProject: {} as Record<string, string>,
       }),
@@ -46,6 +61,49 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       active: "",
       healthy: undefined as boolean | undefined,
     })
+
+    const fetcher = platform.fetch ?? globalThis.fetch
+
+    const authHeaders = (url: string) => {
+      const password = typeof window === "undefined" ? undefined : window.__OPENCODE__?.serverPassword
+      if (!password) return undefined
+      if (!isLocalUrl(url)) return undefined
+      return { Authorization: `Basic ${btoa(`opencode:${password}`)}` }
+    }
+
+    const identity = async (url: string) => {
+      const response = await fetcher(`${url}/global/identity`, { headers: authHeaders(url) }).catch(() => undefined)
+      if (!response?.ok) {
+        setStore("identityError", url, `status:${response?.status ?? 0}`)
+        return
+      }
+      const value = (await response.json().catch(() => undefined)) as Identity | undefined
+      if (!value?.instanceID) {
+        setStore("identityError", url, "invalid-response")
+        return
+      }
+
+      const prev = projectsKey(url)
+      const next = identityKey(value.instanceID)
+      if (store.identity[url] === value.instanceID && prev === next) return
+
+      const old = store.projects[prev] ?? []
+      const current = store.projects[next] ?? []
+      const merged = [...current, ...old].reduce<StoredProject[]>((acc, item) => {
+        if (acc.some((entry) => entry.worktree === item.worktree)) return acc
+        acc.push(item)
+        return acc
+      }, [])
+
+      batch(() => {
+        setStore("identity", url, value.instanceID)
+        setStore("identityError", url, "")
+        setStore("projects", next, merged)
+        const last = store.lastProject[next] ?? store.lastProject[prev]
+        if (!last) return
+        setStore("lastProject", next, last)
+      })
+    }
 
     const healthy = () => state.healthy
 
@@ -144,8 +202,16 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
 
     const isReady = createMemo(() => ready() && !!state.active)
 
-    const fetcher = platform.fetch ?? globalThis.fetch
     const check = (url: string) => checkServerHealth(url, fetcher).then((x) => x.healthy)
+
+    createEffect(() => {
+      if (!ready()) return
+      const urls = [state.active, ...store.list].filter(Boolean)
+      for (const url of urls) {
+        if (store.identity[url]) continue
+        void identity(url)
+      }
+    })
 
     createEffect(() => {
       const url = state.active
@@ -155,9 +221,15 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       onCleanup(startHealthPolling(url))
     })
 
-    const origin = createMemo(() => projectsKey(state.active))
+    const origin = createMemo(() => {
+      const current = state.active
+      if (!current) return ""
+      const id = store.identity[current]
+      if (id) return identityKey(id)
+      return projectsKey(current)
+    })
     const projectsList = createMemo(() => store.projects[origin()] ?? [])
-    const isLocal = createMemo(() => origin() === "local")
+    const isLocal = createMemo(() => isLocalUrl(state.active))
 
     return {
       ready: isReady,
@@ -168,6 +240,21 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       },
       get name() {
         return serverDisplayName(state.active)
+      },
+      identity() {
+        const current = state.active
+        if (!current) return
+        return store.identity[current]
+      },
+      identityError() {
+        const current = state.active
+        if (!current) return
+        return store.identityError[current]
+      },
+      identityOf(input: string) {
+        const url = normalizeServerUrl(input)
+        if (!url) return
+        return store.identity[url]
       },
       get list() {
         return store.list

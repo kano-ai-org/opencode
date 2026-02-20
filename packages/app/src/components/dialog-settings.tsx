@@ -9,10 +9,13 @@ import { SettingsKeybinds } from "./settings-keybinds"
 import { SettingsProviders } from "./settings-providers"
 import { SettingsModels } from "./settings-models"
 import { SettingsAgents } from "./settings-agents"
+import { SettingsWorkspaceSync } from "./settings-workspace-sync"
 
 export const DialogSettings: Component = () => {
   const language = useLanguage()
   const platform = usePlatform()
+  const branch = import.meta.env.VITE_APP_GIT_BRANCH || "unknown"
+  const revision = import.meta.env.VITE_APP_GIT_REVISION || "unknown"
 
   return (
     <Dialog size="x-large" transition>
@@ -50,6 +53,10 @@ export const DialogSettings: Component = () => {
                       <Icon name="models" />
                       {language.t("settings.agents.title")}
                     </Tabs.Trigger>
+                    <Tabs.Trigger value="workspace-sync">
+                      <Icon name="folder" />
+                      Workspace Sync
+                    </Tabs.Trigger>
                   </div>
                 </div>
               </div>
@@ -57,6 +64,8 @@ export const DialogSettings: Component = () => {
             <div class="flex flex-col gap-1 pl-1 py-1 text-12-medium text-text-weak">
               <span>{language.t("app.name.desktop")}</span>
               <span class="text-11-regular">v{platform.version}</span>
+              <span class="text-11-regular">{branch}</span>
+              <span class="text-11-regular">{revision}</span>
             </div>
           </div>
         </Tabs.List>
@@ -74,6 +83,9 @@ export const DialogSettings: Component = () => {
         </Tabs.Content>
         <Tabs.Content value="agents" class="no-scrollbar">
           <SettingsAgents />
+        </Tabs.Content>
+        <Tabs.Content value="workspace-sync" class="no-scrollbar">
+          <SettingsWorkspaceSync />
         </Tabs.Content>
       </Tabs>
     </Dialog>
