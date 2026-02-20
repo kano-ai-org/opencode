@@ -95,7 +95,7 @@ type WorkspaceKeySnapshot = {
   missingPaths: string[]
   pathStatus: "ok" | "missing" | "unresolved"
   sessionCount: number
-  sessions: { id: string; title: string; directory: string; updated: number }[]
+  sessions: { id: string; title: string; directory: string; updated: number; archived: boolean }[]
 }
 
 type TabHandoff = {
@@ -962,10 +962,10 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
                 headers: requestHeaders(),
               })
                 .then(async (response) => {
-                  if (!response.ok) return [] as { id: string; title: string; directory: string; time?: { updated?: number } }[]
+                  if (!response.ok) return [] as { id: string; title: string; directory: string; time?: { updated?: number; archived?: number } }[]
                   const body = await response.json().catch(() => undefined)
-                  if (!Array.isArray(body)) return [] as { id: string; title: string; directory: string; time?: { updated?: number } }[]
-                  return body as { id: string; title: string; directory: string; time?: { updated?: number } }[]
+                  if (!Array.isArray(body)) return [] as { id: string; title: string; directory: string; time?: { updated?: number; archived?: number } }[]
+                  return body as { id: string; title: string; directory: string; time?: { updated?: number; archived?: number } }[]
                 })
                 .then((rows) =>
                   rows
@@ -975,6 +975,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
                       title: row.title,
                       directory: row.directory,
                       updated: typeof row.time?.updated === "number" ? row.time.updated : 0,
+                      archived: typeof row.time?.archived === "number",
                     }))
                     .sort((a, b) => b.updated - a.updated),
                 )

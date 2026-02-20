@@ -181,6 +181,10 @@ export const SettingsWorkspaceSync: Component = () => {
     if (!detail.worktree) return []
     return rows().find((row) => row.worktree === detail.worktree)?.sessions ?? []
   })
+  const detailSummary = createMemo(() => ({
+    active: detailRows().filter((x) => !x.archived).length,
+    archived: detailRows().filter((x) => x.archived).length,
+  }))
 
   const copyDiagnostics = () => {
     const value = diagnostics()
@@ -235,6 +239,26 @@ export const SettingsWorkspaceSync: Component = () => {
     setDetail({ worktree: "" })
   }
 
+  const removeSession = (id: string) => {
+    setTransfer("busy", true)
+    void fetch(`${server.url}/session/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: headers(),
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`session delete failed: ${response.status}`)
+        await refresh()
+        showToast({ variant: "success", title: "Session deleted" })
+      })
+      .catch((error) => {
+        showToast({
+          title: language.t("common.requestFailed"),
+          description: error instanceof Error ? error.message : String(error),
+        })
+      })
+      .finally(() => setTransfer("busy", false))
+  }
+
   return (
     <div
       class="flex flex-col h-full overflow-hidden"
@@ -285,17 +309,25 @@ export const SettingsWorkspaceSync: Component = () => {
                       Back
                     </Button>
                   </div>
-                  <div class="text-11-regular text-text-weak">{detailRows().length} session(s)</div>
+                  <div class="text-11-regular text-text-weak">
+                    {detailRows().length} session(s) | active: {detailSummary().active} | archived: {detailSummary().archived}
+                  </div>
                   <For each={detailRows()}>
                     {(session) => (
                       <div class="border border-border-weak-base rounded-lg p-3 bg-surface-raised-base flex items-center justify-between gap-3">
                         <div class="min-w-0">
                           <div class="text-12-medium text-text-strong break-all">{session.title}</div>
+                          <div class="text-11-regular text-text-weak">{session.archived ? "archived" : "active"}</div>
                           <div class="text-11-regular text-text-weak break-all">{session.id}</div>
                         </div>
-                        <Button variant="secondary" size="small" class="min-h-8 px-3" onClick={() => navigate(`/${base64Encode(detail.worktree)}/session/${session.id}`)}>
-                          Open
-                        </Button>
+                        <div class="flex gap-2">
+                          <Button variant="secondary" size="small" class="min-h-8 px-3" onClick={() => navigate(`/${base64Encode(detail.worktree)}/session/${session.id}`)}>
+                            Open
+                          </Button>
+                          <Button variant="secondary" size="small" class="min-h-8 px-3" disabled={transfer.busy} onClick={() => removeSession(session.id)}>
+                            Delete
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </For>
