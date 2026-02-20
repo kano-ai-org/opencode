@@ -6,6 +6,7 @@ import { Project } from "../../project/project"
 import z from "zod"
 import { errors } from "../error"
 import { lazy } from "../../util/lazy"
+import { existsSync } from "node:fs"
 
 export const ProjectRoutes = lazy(() =>
   new Hono()
@@ -132,6 +133,50 @@ export const ProjectRoutes = lazy(() =>
       async (c) => {
         const projectID = c.req.valid("param").projectID
         return c.json(Project.getWorkspaceToggles(projectID))
+      },
+    )
+    .get(
+      "/:projectID/workspace-paths",
+      describeRoute({
+        summary: "Get workspace path status",
+        description: "Get path existence status for project worktree and sandboxes.",
+        operationId: "project.workspacePaths",
+        responses: {
+          200: {
+            description: "Workspace path status",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    projectID: z.string(),
+                    paths: z.array(
+                      z.object({
+                        path: z.string(),
+                        kind: z.enum(["worktree", "sandbox"]),
+                        exists: z.boolean(),
+                      }),
+                    ),
+                  }),
+                ),
+              },
+            },
+          },
+          ...errors(404),
+        },
+      }),
+      validator("param", z.object({ projectID: z.string() })),
+      async (c) => {
+        const projectID = c.req.valid("param").projectID
+        const project = Project.get(projectID)
+        if (!project) throw new Error(`Project not found: ${projectID}`)
+
+        return c.json({
+          projectID,
+          paths: [
+            { path: project.worktree, kind: "worktree" as const, exists: existsSync(project.worktree) },
+            ...project.sandboxes.map((path) => ({ path, kind: "sandbox" as const, exists: existsSync(path) })),
+          ],
+        })
       },
     )
     .patch(

@@ -92,6 +92,8 @@ type WorkspaceKeySnapshot = {
   isIndexed: boolean
   sandboxCount: number
   sandboxes: string[]
+  missingPaths: string[]
+  pathStatus: "ok" | "missing" | "unresolved"
 }
 
 type TabHandoff = {
@@ -954,6 +956,25 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
                 .filter((key) => workspaceMatch(key, worktree))
                 .sort((a, b) => a.localeCompare(b))
               const remoteKeys = Object.keys(remote.toggles).sort((a, b) => a.localeCompare(b))
+              const pathStatus = await fetch(
+                `${server.url}/project/${encodeURIComponent(project.id)}/workspace-paths`,
+                { headers: requestHeaders() },
+              )
+                .then(async (response) => {
+                  if (!response.ok) return { status: "unresolved" as const, missing: [] as string[] }
+                  const body = await response.json().catch(() => undefined)
+                  if (!body || typeof body !== "object") return { status: "unresolved" as const, missing: [] as string[] }
+                  const paths = Array.isArray((body as { paths?: unknown[] }).paths)
+                    ? ((body as { paths: { path?: unknown; exists?: unknown }[] }).paths ?? [])
+                    : []
+                  const missing = paths
+                    .filter((item) => typeof item.path === "string" && item.exists === false)
+                    .map((item) => item.path as string)
+                    .sort((a, b) => a.localeCompare(b))
+                  if (missing.length > 0) return { status: "missing" as const, missing }
+                  return { status: "ok" as const, missing: [] as string[] }
+                })
+                .catch(() => ({ status: "unresolved" as const, missing: [] as string[] }))
 
               const row: WorkspaceKeySnapshot = {
                 projectID: project.id,
@@ -966,6 +987,8 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
                 isIndexed: indexed.has(worktree),
                 sandboxCount: project.sandboxes?.length ?? 0,
                 sandboxes: (project.sandboxes ?? []).slice().sort((a, b) => a.localeCompare(b)),
+                missingPaths: pathStatus.missing,
+                pathStatus: pathStatus.status,
               }
               return row
             }),

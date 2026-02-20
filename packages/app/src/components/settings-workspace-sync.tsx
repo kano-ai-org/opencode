@@ -52,12 +52,24 @@ export const SettingsWorkspaceSync: Component = () => {
   const local = createMemo(() => layout.workspaceSync.localKeys())
   const rows = createMemo(() => snapshot() ?? [])
   const sourceRows = createMemo(() => ({
-    merged: rows().filter((row) => row.source === "merged" && !isTempProject(row.worktree) && !isInternalGitMeta(row.worktree)),
-    opened: rows().filter((row) => row.source === "opened" && !isTempProject(row.worktree) && !isInternalGitMeta(row.worktree)),
-    indexed: rows().filter((row) => row.source === "indexed" && !isTempProject(row.worktree) && !isInternalGitMeta(row.worktree)),
+    merged: rows().filter(
+      (row) =>
+        row.source === "merged" && !isTempProject(row.worktree) && !isInternalGitMeta(row.worktree) && row.pathStatus === "ok" && row.missingPaths.length === 0,
+    ),
+    opened: rows().filter(
+      (row) =>
+        row.source === "opened" && !isTempProject(row.worktree) && !isInternalGitMeta(row.worktree) && row.pathStatus === "ok" && row.missingPaths.length === 0,
+    ),
+    indexed: rows().filter(
+      (row) =>
+        row.source === "indexed" && !isTempProject(row.worktree) && !isInternalGitMeta(row.worktree) && row.pathStatus === "ok" && row.missingPaths.length === 0,
+    ),
   }))
-  const tempRows = createMemo(() => rows().filter((row) => isTempProject(row.worktree)))
+  const tempRows = createMemo(() => rows().filter((row) => isTempProject(row.worktree) && row.missingPaths.length === 0))
   const internalRows = createMemo(() => rows().filter((row) => isInternalGitMeta(row.worktree)))
+  const missingRows = createMemo(
+    () => rows().filter((row) => row.projectID !== "global" && row.pathStatus !== "ok" && !isInternalGitMeta(row.worktree)),
+  )
 
   const refresh = async () => {
     await layout.workspaceSync.refresh()
@@ -242,6 +254,7 @@ export const SettingsWorkspaceSync: Component = () => {
               <Tabs.Trigger value="opened">Opened</Tabs.Trigger>
               <Tabs.Trigger value="indexed">Indexed</Tabs.Trigger>
               <Tabs.Trigger value="temp">Temporary</Tabs.Trigger>
+              <Tabs.Trigger value="missing">Missing Paths</Tabs.Trigger>
               <Tabs.Trigger value="internal">Internal</Tabs.Trigger>
               <Tabs.Trigger value="raw-json">Raw JSON</Tabs.Trigger>
             </Tabs.List>
@@ -461,6 +474,46 @@ export const SettingsWorkspaceSync: Component = () => {
                 )}
               </For>
               {tempRows().length === 0 ? (
+                <div class="border border-border-weak-base rounded-lg p-4 bg-surface-raised-base text-12-regular text-text-weak">(empty)</div>
+              ) : null}
+            </Tabs.Content>
+
+            <Tabs.Content value="missing" class="flex flex-col gap-3">
+              <div class="text-11-regular text-text-warning-base">{missingRows().length} project(s) with missing paths</div>
+              <div class="text-12-regular text-text-weak">These paths may have been moved, renamed, or deleted. Review and decide whether to keep or delete those project records.</div>
+              <For each={missingRows()}>
+                {(row) => (
+                  <div class="border border-border-warning-base rounded-lg p-4 bg-surface-raised-base flex flex-col gap-3">
+                    <div>
+                      <div class="text-13-medium text-text-strong break-all">{row.worktree}</div>
+                      <div class="text-11-regular text-text-weak break-all">projectID: {row.projectID}</div>
+                      <div class="text-11-regular text-text-weak">source: {row.source} | path status: {row.pathStatus}</div>
+                    </div>
+                    <div>
+                      <div class="text-12-medium text-text-warning-base">Missing paths</div>
+                      <div class="text-12-regular text-text-weak break-all">
+                        <For each={row.missingPaths}>{(item) => <div>{item}</div>}</For>
+                        {row.pathStatus === "unresolved" ? <div>(path status unresolved: failed to query server)</div> : null}
+                      </div>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                      <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openProject(row.worktree)}>
+                        Open project
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="small"
+                        class="min-h-9 px-3"
+                        onClick={() => removeProject(row.projectID)}
+                        disabled={isGlobalProject(row.projectID)}
+                      >
+                        Delete project
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </For>
+              {missingRows().length === 0 ? (
                 <div class="border border-border-weak-base rounded-lg p-4 bg-surface-raised-base text-12-regular text-text-weak">(empty)</div>
               ) : null}
             </Tabs.Content>
