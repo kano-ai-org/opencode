@@ -958,7 +958,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
                 .filter((key) => workspaceMatch(key, worktree))
                 .sort((a, b) => a.localeCompare(b))
               const remoteKeys = Object.keys(remote.toggles).sort((a, b) => a.localeCompare(b))
-              const sessions = await fetch(`${server.url}/session?directory=${encodeURIComponent(worktree)}&limit=300`, {
+              const sessions = await fetch(`${server.url}/session?limit=300`, {
                 headers: requestHeaders(),
               })
                 .then(async (response) => {
@@ -970,6 +970,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
                 .then((rows) =>
                   rows
                     .filter((row) => typeof row.id === "string" && typeof row.title === "string" && typeof row.directory === "string")
+                    .filter((row) => workspaceMatch(row.directory, worktree))
                     .map((row) => ({
                       id: row.id,
                       title: row.title,

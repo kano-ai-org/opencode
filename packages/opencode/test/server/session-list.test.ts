@@ -29,6 +29,21 @@ describe("Session.list", () => {
     })
   })
 
+  test("filters by directory with slash and casing variants", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const created = await Session.create({ title: "variant-session" })
+        const variant = projectRoot.replaceAll("\\", "/").toLowerCase()
+
+        const sessions = [...Session.list({ directory: variant })]
+        const ids = sessions.map((s) => s.id)
+
+        expect(ids).toContain(created.id)
+      },
+    })
+  })
+
   test("filters root sessions", async () => {
     await Instance.provide({
       directory: projectRoot,

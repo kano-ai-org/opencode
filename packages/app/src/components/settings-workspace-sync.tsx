@@ -9,6 +9,7 @@ import { useLocation, useNavigate } from "@solidjs/router"
 import { base64Encode } from "@opencode-ai/util/encode"
 import { useServer } from "@/context/server"
 import { TextField } from "@opencode-ai/ui/text-field"
+import { workspaceMatch } from "@/pages/layout/helpers"
 
 const isTempProject = (worktree: string) => {
   const value = worktree.replace(/\\/g, "/").toLowerCase()
@@ -195,6 +196,13 @@ export const SettingsWorkspaceSync: Component = () => {
       | { id: string; directory: string; title: string; time?: { archived?: number } }
       | undefined
   })
+  const owner = createMemo(() => {
+    const item = currentSession()
+    if (!item) return
+    const row = rows().find((row) => workspaceMatch(item.directory, row.worktree))
+    if (!row) return
+    return row
+  })
 
   const copyDiagnostics = () => {
     const value = diagnostics()
@@ -326,6 +334,7 @@ export const SettingsWorkspaceSync: Component = () => {
                     {(session) => {
                       const entry = session()
                       const inWorkspace = detailRows().some((item) => item.id === entry.id)
+                      const own = owner()
                       return (
                         <div class="border border-border-weak-base rounded-lg p-3 bg-surface-raised-base">
                           <div class="text-12-medium text-text-strong">Current URL session</div>
@@ -334,6 +343,14 @@ export const SettingsWorkspaceSync: Component = () => {
                           <div class="text-11-regular text-text-weak">
                             state: {typeof entry.time?.archived === "number" ? "archived" : "active"} | in this workspace list: {String(inWorkspace)}
                           </div>
+                          <div class="text-11-regular text-text-weak break-all">owner workspace: {own?.worktree ?? "(unresolved)"}</div>
+                          <Show when={own && own.worktree !== detail.worktree}>
+                            <div class="pt-2">
+                              <Button variant="secondary" size="small" class="min-h-8 px-3" onClick={() => setDetail({ worktree: own!.worktree })}>
+                                Go to owner workspace
+                              </Button>
+                            </div>
+                          </Show>
                         </div>
                       )
                     }}

@@ -10,7 +10,7 @@ import { Flag } from "../flag/flag"
 import { Identifier } from "../id/id"
 import { Installation } from "../installation"
 
-import { Database, NotFoundError, eq, and, or, gte, isNull, desc, like } from "../storage/db"
+import { Database, NotFoundError, eq, and, or, gte, isNull, desc, like, sql } from "../storage/db"
 import { SessionTable, MessageTable, PartTable } from "./session.sql"
 import { Storage } from "@/storage/storage"
 import { Log } from "../util/log"
@@ -26,6 +26,12 @@ import { PermissionNext } from "@/permission/next"
 import { Global } from "@/global"
 import type { LanguageModelV2Usage } from "@ai-sdk/provider"
 import { iife } from "@/util/iife"
+
+const pathkey = (directory: string) => {
+  const normalized = directory.replace(/\\/g, "/").replace(/\/+$/, "")
+  if (!/^[A-Za-z]:\//.test(normalized)) return normalized
+  return `${normalized.slice(0, 1).toUpperCase()}${normalized.slice(1).toLowerCase()}`
+}
 
 export namespace Session {
   const log = Log.create({ service: "session" })
@@ -516,7 +522,8 @@ export namespace Session {
     const conditions = [eq(SessionTable.project_id, project.id)]
 
     if (input?.directory) {
-      conditions.push(eq(SessionTable.directory, input.directory))
+      const key = pathkey(input.directory)
+      conditions.push(sql`lower(replace(${SessionTable.directory}, '\\', '/')) = ${key.toLowerCase()}`)
     }
     if (input?.roots) {
       conditions.push(isNull(SessionTable.parent_id))
@@ -539,7 +546,9 @@ export namespace Session {
         .limit(limit)
         .all(),
     )
+    const match = input?.directory ? pathkey(input.directory) : ""
     for (const row of rows) {
+      if (input?.directory && pathkey(row.directory) !== match) continue
       yield fromRow(row)
     }
   }
