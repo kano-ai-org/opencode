@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { collectOpenProjectDeepLinks, drainPendingDeepLinks, parseDeepLink } from "./deep-links"
-import { displayName, errorMessage, getDraggableId, syncWorkspaceOrder, workspaceKey } from "./helpers"
+import { displayName, errorMessage, getDraggableId, syncWorkspaceOrder, workspaceKey, workspaceMatch } from "./helpers"
 
 describe("layout deep links", () => {
   test("parses open-project deep links", () => {
@@ -65,6 +65,15 @@ describe("layout workspace helpers", () => {
     expect(workspaceKey("///")).toBe("/")
     expect(workspaceKey("C:/")).toBe("C:/")
     expect(workspaceKey("C:///")).toBe("C:/")
+  })
+
+  test("matches workspace aliases by trailing path segments", () => {
+    expect(
+      workspaceMatch(
+        "C:/Users/dorgon.chang/AppData/Local/Temp/opencode-e2e-project-foo",
+        "C:/Users/DORGON~1.CHA/AppData/Local/Temp/opencode-e2e-project-foo",
+      ),
+    ).toBe(true)
   })
 
   test("keeps local first while preserving known order", () => {

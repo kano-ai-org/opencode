@@ -41,6 +41,9 @@ test("workspace toggle syncs across browser contexts after reload", async ({ pag
       })
 
       await setWorkspacesEnabled(secondPage, slug, false)
+      await expect(secondPage.locator('[data-component="sidebar-nav-desktop"] [data-component="workspace-item"]')).toHaveCount(0, {
+        timeout: 30_000,
+      })
       await page.reload()
       await expect(page.locator(promptSelector)).toBeVisible()
       await openSidebar(page)

@@ -11,6 +11,17 @@ const normalize = (directory: string) => {
   return `${next.slice(0, 1).toUpperCase()}${next.slice(1).toLowerCase()}`
 }
 
+const tail = (directory: string) => normalize(directory).split("/").filter(Boolean).slice(-2).join("/")
+
+const sameWorkspace = (a: string, b: string) => {
+  const left = normalize(a)
+  const right = normalize(b)
+  if (left === right) return true
+  const leftTail = tail(left)
+  if (!leftTail) return false
+  return leftTail === tail(right)
+}
+
 export const EMPTY_WORKSPACE_TOGGLES: WorkspaceTogglesState = {
   version: 0,
   toggles: {},
@@ -24,16 +35,16 @@ export function filterWorkspaceToggles(
   project: Pick<Project, "worktree" | "sandboxes">,
   toggles: Record<string, boolean>,
 ) {
-  const allowed = new Set(workspaceDirectories(project).map(normalize))
-  return Object.fromEntries(Object.entries(toggles).filter(([directory]) => allowed.has(normalize(directory))))
+  const allowed = workspaceDirectories(project)
+  return Object.fromEntries(Object.entries(toggles).filter(([directory]) => allowed.some((item) => sameWorkspace(item, directory))))
 }
 
 export function pickLocalWorkspaceToggles(
   project: Pick<Project, "worktree" | "sandboxes">,
   map: Record<string, boolean>,
 ) {
-  const allowed = new Set(workspaceDirectories(project).map(normalize))
-  return Object.fromEntries(Object.entries(map).filter(([directory]) => allowed.has(normalize(directory))))
+  const allowed = workspaceDirectories(project)
+  return Object.fromEntries(Object.entries(map).filter(([directory]) => allowed.some((item) => sameWorkspace(item, directory))))
 }
 
 export function applyWorkspaceToggles(
@@ -42,15 +53,15 @@ export function applyWorkspaceToggles(
   toggles: Record<string, boolean>,
 ) {
   const next = { ...current }
-  const normalized = Object.entries(toggles).reduce<Record<string, boolean>>((acc, [directory, value]) => {
-    acc[normalize(directory)] = value
-    return acc
-  }, {})
+  const entries = Object.entries(toggles)
 
   for (const directory of workspaceDirectories(project)) {
-    const value = toggles[directory] ?? normalized[normalize(directory)]
+    const value = entries.find(([item]) => sameWorkspace(item, directory))?.[1]
+    for (const existing of Object.keys(next)) {
+      if (!sameWorkspace(existing, directory)) continue
+      delete next[existing]
+    }
     if (value === undefined) {
-      delete next[directory]
       continue
     }
     next[directory] = value

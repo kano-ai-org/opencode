@@ -62,6 +62,7 @@ import {
   displayName,
   errorMessage,
   getDraggableId,
+  workspaceMatch,
   sortedRootSessions,
   syncWorkspaceOrder,
   workspaceKey,
@@ -121,7 +122,13 @@ export default function Layout(props: ParentProps) {
     dark: "theme.scheme.dark",
   }
   const colorSchemeLabel = (scheme: ColorScheme) => language.t(colorSchemeKey[scheme])
-  const currentDir = createMemo(() => decode64(params.dir) ?? "")
+  const currentDir = createMemo(() => {
+    const directory = decode64(params.dir) ?? ""
+    if (!directory) return ""
+
+    const known = layout.projects.list().flatMap((project) => [project.worktree, ...(project.sandboxes ?? [])])
+    return known.find((item) => workspaceMatch(item, directory)) ?? directory
+  })
 
   const [state, setState] = createStore({
     autoselect: !initialDirectory,
@@ -1496,7 +1503,29 @@ export default function Layout(props: ParentProps) {
         if (!directory) return
 
         const known = value.projects.flatMap((project) => [project.worktree, ...(project.sandboxes ?? [])])
-        const canonical = known.find((item) => workspaceKey(item) === workspaceKey(directory))
+        const canonical = known.find((item) => workspaceMatch(item, directory))
+        if (!canonical) return
+        if (canonical === directory) return
+
+        const href = `/${base64Encode(canonical)}${value.id ? `/session/${value.id}` : ""}`
+        navigate(href, { replace: true })
+      },
+      { defer: true },
+    ),
+  )
+
+  createEffect(
+    on(
+      () => ({ ready: pageReady(), dir: params.dir, id: params.id, projects: layout.projects.list() }),
+      (value) => {
+        if (!value.ready) return
+        if (!value.dir) return
+
+        const directory = decode64(value.dir)
+        if (!directory) return
+
+        const known = value.projects.flatMap((project) => [project.worktree, ...(project.sandboxes ?? [])])
+        const canonical = known.find((item) => workspaceMatch(item, directory))
         if (!canonical) return
         if (canonical === directory) return
 
@@ -1714,7 +1743,10 @@ export default function Layout(props: ParentProps) {
     closeProject,
     showEditProjectDialog,
     toggleProjectWorkspaces,
-    workspacesEnabled: (project) => project.vcs === "git" && layout.sidebar.workspaces(project.worktree)(),
+    workspacesEnabled: (project) => {
+      if (project.vcs && project.vcs !== "git") return false
+      return layout.sidebar.workspaces(project.worktree)()
+    },
     workspaceIds,
     workspaceLabel,
     sessionProps: {
@@ -1752,7 +1784,7 @@ export default function Layout(props: ParentProps) {
     const workspacesEnabled = createMemo(() => {
       const project = panelProps.project
       if (!project) return false
-      if (project.vcs !== "git") return false
+      if (project.vcs && project.vcs !== "git") return false
       return layout.sidebar.workspaces(project.worktree)()
     })
     const homedir = createMemo(() => globalSync.data.path.home)
@@ -1817,7 +1849,7 @@ export default function Layout(props: ParentProps) {
                         <DropdownMenu.Item
                           data-action="project-workspaces-toggle"
                           data-project={base64Encode(p().worktree)}
-                          disabled={p().vcs !== "git" && !layout.sidebar.workspaces(p().worktree)()}
+                          disabled={p().vcs !== undefined && p().vcs !== "git" && !layout.sidebar.workspaces(p().worktree)()}
                           onSelect={() => toggleProjectWorkspaces(p())}
                         >
                           <DropdownMenu.ItemLabel>

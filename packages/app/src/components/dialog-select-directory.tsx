@@ -62,6 +62,7 @@ function displayPath(path: string, input: string, home: string) {
 
 function toRow(absolute: string, home: string): Row {
   const full = trimTrailing(absolute)
+  const back = full.replace(/\//g, "\\")
   const tilde = tildeOf(full, home)
   const withSlash = (value: string) => {
     if (!value) return ""
@@ -70,7 +71,16 @@ function toRow(absolute: string, home: string): Row {
   }
 
   const search = Array.from(
-    new Set([full, withSlash(full), tilde, withSlash(tilde), getFilename(full)].filter(Boolean)),
+    new Set([
+      full,
+      withSlash(full),
+      back,
+      withSlash(back),
+      tilde,
+      withSlash(tilde),
+      getFilename(full),
+      getFilename(back),
+    ].filter(Boolean)),
   ).join("\n")
   return { absolute: full, search }
 }
@@ -277,7 +287,7 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
         key={(x) => x.absolute}
         filterKeys={["search"]}
         ref={(r) => (list = r)}
-        onFilter={(value) => setFilter(cleanInput(value))}
+        onFilter={(value) => setFilter(normalizeDriveRoot(cleanInput(value)))}
         onKeyEvent={(e, item) => {
           if (e.key !== "Tab") return
           if (e.shiftKey) return

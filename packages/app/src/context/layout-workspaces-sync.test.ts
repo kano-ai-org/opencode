@@ -46,6 +46,7 @@ describe("layout workspace sync helpers", () => {
         windowsProject,
         {
           "D:/Work/Repo": false,
+          "d:\\work\\repo": false,
           "D:/Work/Repo/.sandbox": true,
         },
         {
@@ -56,6 +57,42 @@ describe("layout workspace sync helpers", () => {
     ).toEqual({
       "D:/Work/Repo": true,
       "D:/Work/Repo/.sandbox": false,
+    })
+
+    expect(
+      applyWorkspaceToggles(
+        windowsProject,
+        {
+          "d:\\work\\repo": true,
+        },
+        {},
+      ),
+    ).toEqual({})
+
+    const aliasProject = {
+      worktree: "C:/Users/dorgon.chang/AppData/Local/Temp/opencode-e2e-project-foo",
+      sandboxes: [],
+    }
+    expect(
+      applyWorkspaceToggles(
+        aliasProject,
+        {
+          "C:/Users/dorgon.chang/AppData/Local/Temp/opencode-e2e-project-foo": true,
+        },
+        {},
+      ),
+    ).toEqual({})
+
+    expect(
+      applyWorkspaceToggles(
+        aliasProject,
+        {},
+        {
+          "C:/Users/DORGON~1.CHA/AppData/Local/Temp/opencode-e2e-project-foo": true,
+        },
+      ),
+    ).toEqual({
+      "C:/Users/dorgon.chang/AppData/Local/Temp/opencode-e2e-project-foo": true,
     })
   })
 
