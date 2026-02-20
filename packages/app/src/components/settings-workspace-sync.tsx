@@ -1,7 +1,7 @@
 import { Button } from "@opencode-ai/ui/button"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { showToast } from "@opencode-ai/ui/toast"
-import { Component, For, createMemo, createResource, createSignal } from "solid-js"
+import { Component, For, Show, createMemo, createResource, createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLayout } from "@/context/layout"
 import { useLanguage } from "@/context/language"
@@ -41,6 +41,9 @@ export const SettingsWorkspaceSync: Component = () => {
   const [transfer, setTransfer] = createStore({
     busy: false,
     url: "",
+  })
+  const [detail, setDetail] = createStore({
+    worktree: "",
   })
   let upload: HTMLInputElement | undefined
 
@@ -174,6 +177,11 @@ export const SettingsWorkspaceSync: Component = () => {
     ),
   )
 
+  const detailRows = createMemo(() => {
+    if (!detail.worktree) return []
+    return rows().find((row) => row.worktree === detail.worktree)?.sessions ?? []
+  })
+
   const copyDiagnostics = () => {
     const value = diagnostics()
     void navigator.clipboard
@@ -219,6 +227,14 @@ export const SettingsWorkspaceSync: Component = () => {
       })
   }
 
+  const openDetail = (worktree: string) => {
+    setDetail({ worktree })
+  }
+
+  const backToTab = () => {
+    setDetail({ worktree: "" })
+  }
+
   return (
     <div
       class="flex flex-col h-full overflow-hidden"
@@ -259,6 +275,36 @@ export const SettingsWorkspaceSync: Component = () => {
               <Tabs.Trigger value="raw-json">Raw JSON</Tabs.Trigger>
             </Tabs.List>
 
+            <Show
+              when={!detail.worktree}
+              fallback={
+                <div class="flex flex-col gap-3">
+                  <div class="flex items-center justify-between">
+                    <div class="text-13-medium text-text-strong break-all">Session details: {detail.worktree}</div>
+                    <Button variant="secondary" size="small" class="min-h-8 px-3" onClick={backToTab}>
+                      Back
+                    </Button>
+                  </div>
+                  <div class="text-11-regular text-text-weak">{detailRows().length} session(s)</div>
+                  <For each={detailRows()}>
+                    {(session) => (
+                      <div class="border border-border-weak-base rounded-lg p-3 bg-surface-raised-base flex items-center justify-between gap-3">
+                        <div class="min-w-0">
+                          <div class="text-12-medium text-text-strong break-all">{session.title}</div>
+                          <div class="text-11-regular text-text-weak break-all">{session.id}</div>
+                        </div>
+                        <Button variant="secondary" size="small" class="min-h-8 px-3" onClick={() => navigate(`/${base64Encode(detail.worktree)}/session/${session.id}`)}>
+                          Open
+                        </Button>
+                      </div>
+                    )}
+                  </For>
+                  {detailRows().length === 0 ? (
+                    <div class="border border-border-weak-base rounded-lg p-4 bg-surface-raised-base text-12-regular text-text-weak">(empty)</div>
+                  ) : null}
+                </div>
+              }
+            >
             <Tabs.Content value="overview" class="flex flex-col gap-6">
               <div class="border border-border-weak-base rounded-lg p-4 bg-surface-raised-base">
                 <div class="text-13-medium text-text-strong mb-2">Session transfer</div>
@@ -305,13 +351,29 @@ export const SettingsWorkspaceSync: Component = () => {
 
               <div class="border border-border-weak-base rounded-lg p-4 bg-surface-raised-base">
                 <div class="text-13-medium text-text-strong mb-2">Local cached keys</div>
-                <div class="text-12-regular text-text-weak break-all max-h-40 overflow-y-auto pr-1">
-                  <For each={local()}>{(key) => <div>{key}</div>}</For>
-                  <div class="empty:hidden" />
-                  {local().length === 0 ? <div>(empty)</div> : null}
-                </div>
-              </div>
-            </Tabs.Content>
+                    <div class="text-12-regular text-text-weak break-all max-h-40 overflow-y-auto pr-1">
+                      <For each={local()}>{(key) => <div>{key}</div>}</For>
+                      <div class="empty:hidden" />
+                      {local().length === 0 ? <div>(empty)</div> : null}
+                    </div>
+                  </div>
+
+                  <div class="border border-border-weak-base rounded-lg p-4 bg-surface-raised-base">
+                    <div class="text-13-medium text-text-strong mb-2">Workspace session counts</div>
+                    <div class="text-12-regular text-text-weak flex flex-col gap-2">
+                      <For each={rows().slice().sort((a, b) => b.sessionCount - a.sessionCount)}>
+                        {(row) => (
+                          <div class="flex items-center justify-between gap-2">
+                            <div class="break-all">{row.worktree}</div>
+                            <Button variant="secondary" size="small" class="min-h-8 px-3" onClick={() => openDetail(row.worktree)}>
+                              {row.sessionCount} session(s)
+                            </Button>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </div>
+                </Tabs.Content>
 
             <Tabs.Content value="merged" class="flex flex-col gap-3">
               <div class="text-11-regular text-text-weak">{sourceRows().merged.length} project(s)</div>
@@ -325,9 +387,13 @@ export const SettingsWorkspaceSync: Component = () => {
                       <div class="text-11-regular text-text-weak break-all">directory: {displayDirectory(row.worktree)}</div>
                       <div class="text-11-regular text-text-weak">version: {row.version}</div>
                       <div class="text-11-regular text-text-weak">source: {row.source} | sandboxes: {row.sandboxCount}</div>
+                      <div class="text-11-regular text-text-weak">sessions: {row.sessionCount}</div>
                       <div class="flex flex-wrap gap-2 pt-2">
                         <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openProject(row.worktree)}>
                           Open project
+                        </Button>
+                        <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openDetail(row.worktree)}>
+                          Session details
                         </Button>
                         <Button
                           variant="secondary"
@@ -381,9 +447,13 @@ export const SettingsWorkspaceSync: Component = () => {
                       <div class="text-11-regular text-text-weak break-all">directory: {displayDirectory(row.worktree)}</div>
                       <div class="text-11-regular text-text-weak">version: {row.version}</div>
                       <div class="text-11-regular text-text-weak">source: {row.source} | sandboxes: {row.sandboxCount}</div>
+                      <div class="text-11-regular text-text-weak">sessions: {row.sessionCount}</div>
                       <div class="flex flex-wrap gap-2 pt-2">
                         <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openProject(row.worktree)}>
                           Open project
+                        </Button>
+                        <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openDetail(row.worktree)}>
+                          Session details
                         </Button>
                         <Button
                           variant="secondary"
@@ -416,9 +486,13 @@ export const SettingsWorkspaceSync: Component = () => {
                       <div class="text-11-regular text-text-weak break-all">directory: {displayDirectory(row.worktree)}</div>
                       <div class="text-11-regular text-text-weak">version: {row.version}</div>
                       <div class="text-11-regular text-text-weak">source: {row.source} | sandboxes: {row.sandboxCount}</div>
+                      <div class="text-11-regular text-text-weak">sessions: {row.sessionCount}</div>
                       <div class="flex flex-wrap gap-2 pt-2">
                         <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openProject(row.worktree)}>
                           Open project
+                        </Button>
+                        <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openDetail(row.worktree)}>
+                          Session details
                         </Button>
                         <Button
                           variant="secondary"
@@ -455,9 +529,13 @@ export const SettingsWorkspaceSync: Component = () => {
                       <div class="text-11-regular text-text-weak break-all">projectID: {row.projectID}</div>
                       <div class="text-11-regular text-text-weak break-all">directory: {displayDirectory(row.worktree)}</div>
                       <div class="text-11-regular text-text-weak">source: {row.source}</div>
+                      <div class="text-11-regular text-text-weak">sessions: {row.sessionCount}</div>
                       <div class="flex flex-wrap gap-2 pt-2">
                         <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openProject(row.worktree)}>
                           Open project
+                        </Button>
+                        <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openDetail(row.worktree)}>
+                          Session details
                         </Button>
                         <Button
                           variant="secondary"
@@ -488,6 +566,7 @@ export const SettingsWorkspaceSync: Component = () => {
                       <div class="text-13-medium text-text-strong break-all">{row.worktree}</div>
                       <div class="text-11-regular text-text-weak break-all">projectID: {row.projectID}</div>
                       <div class="text-11-regular text-text-weak">source: {row.source} | path status: {row.pathStatus}</div>
+                      <div class="text-11-regular text-text-weak">sessions: {row.sessionCount}</div>
                     </div>
                     <div>
                       <div class="text-12-medium text-text-warning-base">Missing paths</div>
@@ -499,6 +578,9 @@ export const SettingsWorkspaceSync: Component = () => {
                     <div class="flex flex-wrap gap-2">
                       <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openProject(row.worktree)}>
                         Open project
+                      </Button>
+                      <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openDetail(row.worktree)}>
+                        Session details
                       </Button>
                       <Button
                         variant="secondary"
@@ -528,6 +610,7 @@ export const SettingsWorkspaceSync: Component = () => {
                       <div class="text-11-regular text-text-weak break-all">projectID: {row.projectID}</div>
                       <div class="text-11-regular text-text-weak break-all">directory: {displayDirectory(row.worktree)}</div>
                       <div class="text-11-regular text-text-weak">source: {row.source}</div>
+                      <div class="text-11-regular text-text-weak">sessions: {row.sessionCount}</div>
                     </div>
                   </div>
                 )}
@@ -543,6 +626,7 @@ export const SettingsWorkspaceSync: Component = () => {
                 <pre class="text-11-regular text-text-weak whitespace-pre-wrap break-all max-h-[58vh] overflow-y-auto pr-1">{diagnostics()}</pre>
               </div>
             </Tabs.Content>
+            </Show>
           </Tabs>
         </div>
       </div>

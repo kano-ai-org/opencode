@@ -94,6 +94,8 @@ type WorkspaceKeySnapshot = {
   sandboxes: string[]
   missingPaths: string[]
   pathStatus: "ok" | "missing" | "unresolved"
+  sessionCount: number
+  sessions: { id: string; title: string; directory: string; updated: number }[]
 }
 
 type TabHandoff = {
@@ -956,6 +958,28 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
                 .filter((key) => workspaceMatch(key, worktree))
                 .sort((a, b) => a.localeCompare(b))
               const remoteKeys = Object.keys(remote.toggles).sort((a, b) => a.localeCompare(b))
+              const sessions = await fetch(`${server.url}/session?directory=${encodeURIComponent(worktree)}&limit=300`, {
+                headers: requestHeaders(),
+              })
+                .then(async (response) => {
+                  if (!response.ok) return [] as { id: string; title: string; directory: string; time?: { updated?: number } }[]
+                  const body = await response.json().catch(() => undefined)
+                  if (!Array.isArray(body)) return [] as { id: string; title: string; directory: string; time?: { updated?: number } }[]
+                  return body as { id: string; title: string; directory: string; time?: { updated?: number } }[]
+                })
+                .then((rows) =>
+                  rows
+                    .filter((row) => typeof row.id === "string" && typeof row.title === "string" && typeof row.directory === "string")
+                    .map((row) => ({
+                      id: row.id,
+                      title: row.title,
+                      directory: row.directory,
+                      updated: typeof row.time?.updated === "number" ? row.time.updated : 0,
+                    }))
+                    .sort((a, b) => b.updated - a.updated),
+                )
+                .catch(() => [])
+
               const pathStatus = await fetch(
                 `${server.url}/project/${encodeURIComponent(project.id)}/workspace-paths`,
                 { headers: requestHeaders() },
@@ -989,6 +1013,8 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
                 sandboxes: (project.sandboxes ?? []).slice().sort((a, b) => a.localeCompare(b)),
                 missingPaths: pathStatus.missing,
                 pathStatus: pathStatus.status,
+                sessionCount: sessions.length,
+                sessions,
               }
               return row
             }),
