@@ -127,7 +127,7 @@ const resolveDefaultServerUrl = (props: {
   if (props.defaultUrl) return props.defaultUrl
   if (props.storedDefaultServerUrl) return props.storedDefaultServerUrl
   if (props.hostname.includes("opencode.ai")) return "http://localhost:4096"
-  if (props.isDev) return `http://${props.devHost ?? "localhost"}:${props.devPort ?? "4096"}`
+  if (props.isDev) return `http://${props.devHost ?? props.hostname ?? "localhost"}:${props.devPort ?? "4096"}`
   return props.origin
 }
 
@@ -172,8 +172,8 @@ export function AppInterface(props: { defaultUrl?: string; children?: JSX.Elemen
     hostname: location.hostname,
     origin: window.location.origin,
     isDev: import.meta.env.DEV,
-    devHost: import.meta.env.VITE_OPENCODE_SERVER_HOST,
-    devPort: import.meta.env.VITE_OPENCODE_SERVER_PORT,
+    devHost: import.meta.env.VITE_OPENCODE_SERVER_HOST || undefined,
+    devPort: import.meta.env.VITE_OPENCODE_SERVER_PORT || undefined,
   })
 
   return (
