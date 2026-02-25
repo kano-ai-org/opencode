@@ -96,6 +96,10 @@ type WorkspaceKeySnapshot = {
   pathStatus: "ok" | "missing" | "unresolved"
   sessionCount: number
   sessions: { id: string; title: string; directory: string; parentID?: string; created: number; updated: number; archived: boolean; archivedAt?: number }[]
+  icon?: {
+    override?: string
+    color?: string
+  }
 }
 
 type TabHandoff = {
@@ -498,6 +502,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         id: child.project,
         worktree,
         sandboxes: project?.sandboxes ?? [],
+        icon: project?.icon,
       }
     }
 
@@ -527,6 +532,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         id: match.id,
         worktree: match.worktree,
         sandboxes: match.sandboxes ?? [],
+        icon: match.icon,
       }
     }
 
@@ -1020,6 +1026,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
                 pathStatus: pathStatus.status,
                 sessionCount: sessions.length,
                 sessions,
+                icon: project.icon,
               }
               return row
             }),

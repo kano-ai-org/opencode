@@ -10,6 +10,7 @@ import { base64Encode } from "@opencode-ai/util/encode"
 import { useServer } from "@/context/server"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { workspaceMatch } from "@/pages/layout/helpers"
+import { Avatar } from "@opencode-ai/ui/avatar"
 
 const isTempProject = (worktree: string) => {
   const value = worktree.replace(/\\/g, "/").toLowerCase()
@@ -42,6 +43,17 @@ const time = (value?: number) => {
   if (!value) return "-"
   return new Date(value).toLocaleString()
 }
+
+const WorkspaceIcon = (props: { icon?: { override?: string; color?: string }; title: string }) => (
+  <div class="size-5 rounded-[6px] overflow-hidden bg-surface-weak flex items-center justify-center shrink-0">
+    <Avatar
+      fallback={props.title}
+      src={props.icon?.override}
+      style={{ background: props.icon?.color }}
+      class="size-full rounded-[6px]"
+    />
+  </div>
+)
 
 export const SettingsWorkspaceSync: Component = () => {
   const layout = useLayout()
@@ -340,7 +352,10 @@ export const SettingsWorkspaceSync: Component = () => {
               fallback={
                 <div class="flex flex-col gap-3">
                   <div class="flex items-center justify-between">
-                    <div class="text-13-medium text-text-strong break-all">Session details: {detail.worktree}</div>
+                    <div class="flex items-center gap-2 min-w-0">
+                      <WorkspaceIcon icon={rows().find((row) => row.worktree === detail.worktree)?.icon} title={detail.worktree} />
+                      <div class="text-13-medium text-text-strong break-all">Session details: {detail.worktree}</div>
+                    </div>
                     <Button variant="secondary" size="small" class="min-h-8 px-3" onClick={backToTab}>
                       Back
                     </Button>
@@ -488,7 +503,10 @@ export const SettingsWorkspaceSync: Component = () => {
                 {(row) => (
                   <div class="border border-border-weak-base rounded-lg p-4 bg-surface-raised-base flex flex-col gap-3">
                     <div>
-                      <div class="text-13-medium text-text-strong break-all">{row.worktree}</div>
+                      <div class="flex items-center gap-2 min-w-0">
+                        <WorkspaceIcon icon={row.icon} title={row.worktree} />
+                        <div class="text-13-medium text-text-strong break-all">{row.worktree}</div>
+                      </div>
                       {isGlobalProject(row.projectID) ? <div class="text-11-regular text-text-warning-base">Virtual project (global)</div> : null}
                       <div class="text-11-regular text-text-weak break-all">projectID: {row.projectID}</div>
                       <div class="text-11-regular text-text-weak break-all">directory: {displayDirectory(row.worktree)}</div>
@@ -548,7 +566,10 @@ export const SettingsWorkspaceSync: Component = () => {
                 {(row) => (
                   <div class="border border-border-weak-base rounded-lg p-4 bg-surface-raised-base flex flex-col gap-3">
                     <div>
-                      <div class="text-13-medium text-text-strong break-all">{row.worktree}</div>
+                      <div class="flex items-center gap-2 min-w-0">
+                        <WorkspaceIcon icon={row.icon} title={row.worktree} />
+                        <div class="text-13-medium text-text-strong break-all">{row.worktree}</div>
+                      </div>
                       {isGlobalProject(row.projectID) ? <div class="text-11-regular text-text-warning-base">Virtual project (global)</div> : null}
                       <div class="text-11-regular text-text-weak break-all">projectID: {row.projectID}</div>
                       <div class="text-11-regular text-text-weak break-all">directory: {displayDirectory(row.worktree)}</div>
@@ -587,7 +608,10 @@ export const SettingsWorkspaceSync: Component = () => {
                 {(row) => (
                   <div class="border border-border-weak-base rounded-lg p-4 bg-surface-raised-base flex flex-col gap-3">
                     <div>
-                      <div class="text-13-medium text-text-strong break-all">{row.worktree}</div>
+                      <div class="flex items-center gap-2 min-w-0">
+                        <WorkspaceIcon icon={row.icon} title={row.worktree} />
+                        <div class="text-13-medium text-text-strong break-all">{row.worktree}</div>
+                      </div>
                       {isGlobalProject(row.projectID) ? <div class="text-11-regular text-text-warning-base">Virtual project (global)</div> : null}
                       <div class="text-11-regular text-text-weak break-all">projectID: {row.projectID}</div>
                       <div class="text-11-regular text-text-weak break-all">directory: {displayDirectory(row.worktree)}</div>
@@ -631,7 +655,10 @@ export const SettingsWorkspaceSync: Component = () => {
                 {(row) => (
                   <div class="border border-border-weak-base rounded-lg p-4 bg-surface-raised-base flex flex-col gap-3">
                     <div>
-                      <div class="text-13-medium text-text-strong break-all">{row.worktree}</div>
+                      <div class="flex items-center gap-2 min-w-0">
+                        <WorkspaceIcon icon={row.icon} title={row.worktree} />
+                        <div class="text-13-medium text-text-strong break-all">{row.worktree}</div>
+                      </div>
                       {isGlobalProject(row.projectID) ? <div class="text-11-regular text-text-warning-base">Virtual project (global)</div> : null}
                       <div class="text-11-regular text-text-weak break-all">projectID: {row.projectID}</div>
                       <div class="text-11-regular text-text-weak break-all">directory: {displayDirectory(row.worktree)}</div>
@@ -670,7 +697,10 @@ export const SettingsWorkspaceSync: Component = () => {
                 {(row) => (
                   <div class="border border-border-warning-base rounded-lg p-4 bg-surface-raised-base flex flex-col gap-3">
                     <div>
-                      <div class="text-13-medium text-text-strong break-all">{row.worktree}</div>
+                      <div class="flex items-center gap-2 min-w-0">
+                        <WorkspaceIcon icon={row.icon} title={row.worktree} />
+                        <div class="text-13-medium text-text-strong break-all">{row.worktree}</div>
+                      </div>
                       <div class="text-11-regular text-text-weak break-all">projectID: {row.projectID}</div>
                       <div class="text-11-regular text-text-weak">source: {row.source} | path status: {row.pathStatus}</div>
                       <div class="text-11-regular text-text-weak">sessions: {row.sessionCount}</div>
@@ -713,7 +743,10 @@ export const SettingsWorkspaceSync: Component = () => {
                 {(row) => (
                   <div class="border border-border-weak-base rounded-lg p-4 bg-surface-raised-base flex flex-col gap-3">
                     <div>
-                      <div class="text-13-medium text-text-strong break-all">{row.worktree}</div>
+                      <div class="flex items-center gap-2 min-w-0">
+                        <WorkspaceIcon icon={row.icon} title={row.worktree} />
+                        <div class="text-13-medium text-text-strong break-all">{row.worktree}</div>
+                      </div>
                       <div class="text-11-regular text-text-weak break-all">projectID: {row.projectID}</div>
                       <div class="text-11-regular text-text-weak break-all">directory: {displayDirectory(row.worktree)}</div>
                       <div class="text-11-regular text-text-weak">source: {row.source}</div>

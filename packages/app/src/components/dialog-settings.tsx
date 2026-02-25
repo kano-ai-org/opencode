@@ -19,7 +19,7 @@ export const DialogSettings: Component = () => {
   const revisionNumber = import.meta.env.VITE_APP_GIT_REVISION_NUMBER || "unknown"
 
   return (
-    <Dialog size="x-large" transition>
+    <Dialog size="x-large" transition class="settings-dialog-expanded">
       <Tabs orientation="vertical" variant="settings" defaultValue="general" class="h-full settings-dialog">
         <Tabs.List>
           <div class="flex flex-col justify-between h-full w-full">
