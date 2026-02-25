@@ -2,10 +2,25 @@ import { getFilename } from "@opencode-ai/util/path"
 import { type Session } from "@opencode-ai/sdk/v2/client"
 
 export const workspaceKey = (directory: string) => {
-  const drive = directory.match(/^([A-Za-z]:)[\\/]+$/)
-  if (drive) return `${drive[1]}${directory.includes("\\") ? "\\" : "/"}`
-  if (/^[\\/]+$/.test(directory)) return directory.includes("\\") ? "\\" : "/"
-  return directory.replace(/[\\/]+$/, "")
+  const normalized = directory.replace(/\\/g, "/")
+  const drive = normalized.match(/^([A-Za-z]:)\/+$/)
+  if (drive) return `${drive[1].toUpperCase()}/`
+  if (/^\/+$/i.test(normalized)) return "/"
+
+  const trimmed = normalized.replace(/\/+$/, "")
+  if (!/^[A-Za-z]:\//.test(trimmed)) return trimmed
+  return `${trimmed.slice(0, 1).toUpperCase()}${trimmed.slice(1).toLowerCase()}`
+}
+
+export const workspaceTail = (directory: string) => workspaceKey(directory).split("/").filter(Boolean).slice(-2).join("/")
+
+export const workspaceMatch = (left: string, right: string) => {
+  const leftKey = workspaceKey(left)
+  const rightKey = workspaceKey(right)
+  if (leftKey === rightKey) return true
+  const leftTail = workspaceTail(leftKey)
+  if (!leftTail) return false
+  return leftTail === workspaceTail(rightKey)
 }
 
 export function sortSessions(now: number) {
@@ -23,7 +38,7 @@ export function sortSessions(now: number) {
 }
 
 export const isRootVisibleSession = (session: Session, directory: string) =>
-  workspaceKey(session.directory) === workspaceKey(directory) && !session.parentID && !session.time?.archived
+  workspaceMatch(session.directory, directory) && !session.parentID && !session.time?.archived
 
 export const sortedRootSessions = (store: { session: Session[]; path: { directory: string } }, now: number) =>
   store.session.filter((session) => isRootVisibleSession(session, store.path.directory)).sort(sortSessions(now))

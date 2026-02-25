@@ -863,6 +863,34 @@ export default function Layout(props: ParentProps) {
     }
   }
 
+  async function renameSession(session: Session, next: string) {
+    const title = next.trim()
+    if (!title || title === session.title) return
+
+    const [, setStore] = globalSync.child(session.directory)
+
+    await globalSDK.client.session
+      .update({
+        directory: session.directory,
+        sessionID: session.id,
+        title,
+      })
+      .then(() => {
+        setStore(
+          produce((draft) => {
+            const index = draft.session.findIndex((item) => item.id === session.id)
+            if (index !== -1) draft.session[index].title = title
+          }),
+        )
+      })
+      .catch((err) => {
+        showToast({
+          title: language.t("common.requestFailed"),
+          description: errorMessage(err, language.t("common.requestFailed")),
+        })
+      })
+  }
+
   command.register("layout", () => {
     const commands: CommandOption[] = [
       {
@@ -1766,6 +1794,7 @@ export default function Layout(props: ParentProps) {
     clearHoverProjectSoon,
     prefetchSession,
     archiveSession,
+    renameSession,
     workspaceName,
     renameWorkspace,
     editorOpen,
@@ -1811,6 +1840,10 @@ export default function Layout(props: ParentProps) {
       clearHoverProjectSoon,
       prefetchSession,
       archiveSession,
+      renameSession,
+      editorOpen,
+      openEditor,
+      InlineEditor,
     },
     setHoverSession,
   }
