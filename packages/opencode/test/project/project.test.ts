@@ -281,6 +281,21 @@ describe("Project.update", () => {
     expect(fromDb?.icon?.color).toBe("#ff0000")
   })
 
+  test("should update icon override", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const { project } = await Project.fromDirectory(tmp.path)
+
+    const updated = await Project.update({
+      projectID: project.id,
+      icon: { override: "data:image/png;base64,AAAA" },
+    })
+
+    expect(updated.icon?.override).toBe("data:image/png;base64,AAAA")
+
+    const fromDb = Project.get(project.id)
+    expect(fromDb?.icon?.override).toBe("data:image/png;base64,AAAA")
+  })
+
   test("should update commands", async () => {
     await using tmp = await tmpdir({ git: true })
     const { project } = await Project.fromDirectory(tmp.path)
@@ -336,12 +351,13 @@ describe("Project.update", () => {
     const updated = await Project.update({
       projectID: project.id,
       name: "Multi Update",
-      icon: { url: "https://example.com/favicon.ico", color: "#00ff00" },
+      icon: { url: "https://example.com/favicon.ico", override: "data:image/png;base64,BBBB", color: "#00ff00" },
       commands: { start: "make start" },
     })
 
     expect(updated.name).toBe("Multi Update")
     expect(updated.icon?.url).toBe("https://example.com/favicon.ico")
+    expect(updated.icon?.override).toBe("data:image/png;base64,BBBB")
     expect(updated.icon?.color).toBe("#00ff00")
     expect(updated.commands?.start).toBe("make start")
   })

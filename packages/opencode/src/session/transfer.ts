@@ -113,6 +113,7 @@ export namespace SessionTransfer {
               vcs: row.vcs,
               name: row.name,
               icon_url: row.icon_url,
+              icon_override: row.icon_override,
               icon_color: row.icon_color,
               time_updated: row.time_updated,
               time_initialized: row.time_initialized,
