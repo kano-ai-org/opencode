@@ -6,7 +6,6 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { List } from "@opencode-ai/ui/list"
 import { TextField } from "@opencode-ai/ui/text-field"
-import { useMutation } from "@tanstack/solid-query"
 import { showToast } from "@opencode-ai/ui/toast"
 import { useNavigate } from "@solidjs/router"
 import { createEffect, createMemo, createResource, onCleanup, Show } from "solid-js"
@@ -15,9 +14,7 @@ import { ServerHealthIndicator, ServerRow } from "@/components/server/server-row
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { normalizeServerUrl, ServerConnection, useServer } from "@/context/server"
-import { type ServerHealth, useCheckServerHealth } from "@/utils/server-health"
-
-const DEFAULT_USERNAME = "opencode"
+import { checkServerHealth, type ServerHealth } from "@/utils/server-health"
 
 interface ServerFormProps {
   value: string
@@ -44,15 +41,13 @@ function showRequestError(language: ReturnType<typeof useLanguage>, err: unknown
   })
 }
 
-function useDefaultServer() {
-  const language = useLanguage()
-  const platform = usePlatform()
-  const [defaultKey, defaultUrlActions] = createResource(
+function useDefaultServer(platform: ReturnType<typeof usePlatform>, language: ReturnType<typeof useLanguage>) {
+  const [defaultUrl, defaultUrlActions] = createResource(
     async () => {
       try {
-        const key = await platform.getDefaultServer?.()
-        if (!key) return null
-        return key
+        const url = await platform.getDefaultServerUrl?.()
+        if (!url) return null
+        return normalizeServerUrl(url) ?? null
       } catch (err) {
         showRequestError(language, err)
         return null
@@ -61,22 +56,20 @@ function useDefaultServer() {
     { initialValue: null },
   )
 
-  const canDefault = createMemo(() => !!platform.getDefaultServer && !!platform.setDefaultServer)
-  const setDefault = async (key: ServerConnection.Key | null) => {
+  const canDefault = createMemo(() => !!platform.getDefaultServerUrl && !!platform.setDefaultServerUrl)
+  const setDefault = async (url: string | null) => {
     try {
-      await platform.setDefaultServer?.(key)
-      defaultUrlActions.mutate(key)
+      await platform.setDefaultServerUrl?.(url)
+      defaultUrlActions.mutate(url)
     } catch (err) {
       showRequestError(language, err)
     }
   }
 
-  return { defaultKey, canDefault, setDefault }
+  return { defaultUrl, canDefault, setDefault }
 }
 
-function useServerPreview() {
-  const checkServerHealth = useCheckServerHealth()
-
+function useServerPreview(fetcher: typeof fetch) {
   const looksComplete = (value: string) => {
     const normalized = normalizeServerUrl(value)
     if (!normalized) return false
@@ -99,7 +92,7 @@ function useServerPreview() {
     const http: ServerConnection.HttpBase = { url: normalized }
     if (username) http.username = username
     if (password) http.password = password
-    const result = await checkServerHealth(http)
+    const result = await checkServerHealth(http, fetcher)
     setStatus(result.healthy)
   }
 
@@ -122,7 +115,7 @@ function ServerForm(props: ServerFormProps) {
 
   return (
     <div class="px-5">
-      <div class="bg-surface-base rounded-md p-5 flex flex-col gap-3">
+      <div class="bg-surface-raised-base rounded-md p-5 flex flex-col gap-3">
         <div class="flex-1 min-w-0 [&_[data-slot=input-wrapper]]:relative">
           <TextField
             type="text"
@@ -150,7 +143,7 @@ function ServerForm(props: ServerFormProps) {
           <TextField
             type="text"
             label={language.t("dialog.server.add.username")}
-            placeholder={language.t("dialog.server.add.usernamePlaceholder")}
+            placeholder="username"
             value={props.username}
             disabled={props.busy}
             onChange={props.onUsernameChange}
@@ -159,7 +152,7 @@ function ServerForm(props: ServerFormProps) {
           <TextField
             type="password"
             label={language.t("dialog.server.add.password")}
-            placeholder={language.t("dialog.server.add.passwordPlaceholder")}
+            placeholder="password"
             value={props.password}
             disabled={props.busy}
             onChange={props.onPasswordChange}
@@ -177,16 +170,17 @@ export function DialogSelectServer() {
   const server = useServer()
   const platform = usePlatform()
   const language = useLanguage()
-  const { defaultKey, canDefault, setDefault } = useDefaultServer()
-  const { previewStatus } = useServerPreview()
-  const checkServerHealth = useCheckServerHealth()
+  const fetcher = platform.fetch ?? globalThis.fetch
+  const { defaultUrl, canDefault, setDefault } = useDefaultServer(platform, language)
+  const { previewStatus } = useServerPreview(fetcher)
   const [store, setStore] = createStore({
     status: {} as Record<ServerConnection.Key, ServerHealth | undefined>,
     addServer: {
       url: "",
       name: "",
-      username: DEFAULT_USERNAME,
+      username: "",
       password: "",
+      adding: false,
       error: "",
       showForm: false,
       status: undefined as boolean | undefined,
@@ -198,6 +192,7 @@ export function DialogSelectServer() {
       username: "",
       password: "",
       error: "",
+      busy: false,
       status: undefined as boolean | undefined,
     },
   })
@@ -206,8 +201,9 @@ export function DialogSelectServer() {
     setStore("addServer", {
       url: "",
       name: "",
-      username: DEFAULT_USERNAME,
+      username: "",
       password: "",
+      adding: false,
       error: "",
       showForm: false,
       status: undefined,
@@ -222,81 +218,16 @@ export function DialogSelectServer() {
       password: "",
       error: "",
       status: undefined,
+      busy: false,
     })
   }
 
-  const addMutation = useMutation(() => ({
-    mutationFn: async (value: string) => {
-      const normalized = normalizeServerUrl(value)
-      if (!normalized) {
-        resetAdd()
-        return
-      }
-
-      const conn: ServerConnection.Http = {
-        type: "http",
-        http: { url: normalized },
-      }
-      if (store.addServer.name.trim()) conn.displayName = store.addServer.name.trim()
-      if (store.addServer.password) conn.http.password = store.addServer.password
-      if (store.addServer.password && store.addServer.username) conn.http.username = store.addServer.username
-      const result = await checkServerHealth(conn.http)
-      if (!result.healthy) {
-        setStore("addServer", { error: language.t("dialog.server.add.error") })
-        return
-      }
-
-      resetAdd()
-      await select(conn, true)
-    },
-  }))
-
-  const editMutation = useMutation(() => ({
-    mutationFn: async (input: { original: ServerConnection.Any; value: string }) => {
-      if (input.original.type !== "http") return
-      const normalized = normalizeServerUrl(input.value)
-      if (!normalized) {
-        resetEdit()
-        return
-      }
-
-      const name = store.editServer.name.trim() || undefined
-      const username = store.editServer.username || undefined
-      const password = store.editServer.password || undefined
-      const existingName = input.original.displayName
-      if (
-        normalized === input.original.http.url &&
-        name === existingName &&
-        username === input.original.http.username &&
-        password === input.original.http.password
-      ) {
-        resetEdit()
-        return
-      }
-
-      const conn: ServerConnection.Http = {
-        type: "http",
-        displayName: name,
-        http: { url: normalized, username, password },
-      }
-      const result = await checkServerHealth(conn.http)
-      if (!result.healthy) {
-        setStore("editServer", { error: language.t("dialog.server.add.error") })
-        return
-      }
-      if (normalized === input.original.http.url) {
-        server.add(conn)
-      } else {
-        replaceServer(input.original, conn)
-      }
-
-      resetEdit()
-    },
-  }))
+  const addHttp = (conn: ServerConnection.Http) =>
+    (server.add as (input: ServerConnection.Http) => ServerConnection.Http | undefined)(conn)
 
   const replaceServer = (original: ServerConnection.Http, next: ServerConnection.Http) => {
     const active = server.key
-    const newConn = server.add(next)
+    const newConn = addHttp(next)
     if (!newConn) return
     const nextActive = active === ServerConnection.key(original) ? ServerConnection.key(newConn) : active
     if (nextActive) server.setActive(nextActive)
@@ -336,7 +267,7 @@ export function DialogSelectServer() {
     const results: Record<ServerConnection.Key, ServerHealth> = {}
     await Promise.all(
       items().map(async (conn) => {
-        results[ServerConnection.key(conn)] = await checkServerHealth(conn.http)
+        results[ServerConnection.key(conn)] = await checkServerHealth(conn.http, fetcher)
       }),
     )
     setStore("status", reconcile(results))
@@ -353,16 +284,16 @@ export function DialogSelectServer() {
     if (!persist && store.status[ServerConnection.key(conn)]?.healthy === false) return
     dialog.close()
     if (persist && conn.type === "http") {
-      server.add(conn)
+      addHttp(conn)
       navigate("/")
       return
     }
+    server.setActive(ServerConnection.key(conn))
     navigate("/")
-    queueMicrotask(() => server.setActive(ServerConnection.key(conn)))
   }
 
   const handleAddChange = (value: string) => {
-    if (addMutation.isPending) return
+    if (store.addServer.adding) return
     setStore("addServer", { url: value, error: "" })
     void previewStatus(value, store.addServer.username, store.addServer.password, (next) =>
       setStore("addServer", { status: next }),
@@ -370,12 +301,12 @@ export function DialogSelectServer() {
   }
 
   const handleAddNameChange = (value: string) => {
-    if (addMutation.isPending) return
+    if (store.addServer.adding) return
     setStore("addServer", { name: value, error: "" })
   }
 
   const handleAddUsernameChange = (value: string) => {
-    if (addMutation.isPending) return
+    if (store.addServer.adding) return
     setStore("addServer", { username: value, error: "" })
     void previewStatus(store.addServer.url, value, store.addServer.password, (next) =>
       setStore("addServer", { status: next }),
@@ -383,7 +314,7 @@ export function DialogSelectServer() {
   }
 
   const handleAddPasswordChange = (value: string) => {
-    if (addMutation.isPending) return
+    if (store.addServer.adding) return
     setStore("addServer", { password: value, error: "" })
     void previewStatus(store.addServer.url, store.addServer.username, value, (next) =>
       setStore("addServer", { status: next }),
@@ -391,7 +322,7 @@ export function DialogSelectServer() {
   }
 
   const handleEditChange = (value: string) => {
-    if (editMutation.isPending) return
+    if (store.editServer.busy) return
     setStore("editServer", { value, error: "" })
     void previewStatus(value, store.editServer.username, store.editServer.password, (next) =>
       setStore("editServer", { status: next }),
@@ -399,12 +330,12 @@ export function DialogSelectServer() {
   }
 
   const handleEditNameChange = (value: string) => {
-    if (editMutation.isPending) return
+    if (store.editServer.busy) return
     setStore("editServer", { name: value, error: "" })
   }
 
   const handleEditUsernameChange = (value: string) => {
-    if (editMutation.isPending) return
+    if (store.editServer.busy) return
     setStore("editServer", { username: value, error: "" })
     void previewStatus(store.editServer.value, value, store.editServer.password, (next) =>
       setStore("editServer", { status: next }),
@@ -412,11 +343,83 @@ export function DialogSelectServer() {
   }
 
   const handleEditPasswordChange = (value: string) => {
-    if (editMutation.isPending) return
+    if (store.editServer.busy) return
     setStore("editServer", { password: value, error: "" })
     void previewStatus(store.editServer.value, store.editServer.username, value, (next) =>
       setStore("editServer", { status: next }),
     )
+  }
+
+  async function handleAdd(value: string) {
+    if (store.addServer.adding) return
+    const normalized = normalizeServerUrl(value)
+    if (!normalized) {
+      resetAdd()
+      return
+    }
+
+    setStore("addServer", { adding: true, error: "" })
+
+    const conn: ServerConnection.Http = {
+      type: "http",
+      http: { url: normalized },
+    }
+    if (store.addServer.name.trim()) conn.displayName = store.addServer.name.trim()
+    if (store.addServer.username) conn.http.username = store.addServer.username
+    if (store.addServer.password) conn.http.password = store.addServer.password
+    const result = await checkServerHealth(conn.http, fetcher)
+    setStore("addServer", { adding: false })
+    if (!result.healthy) {
+      setStore("addServer", { error: language.t("dialog.server.add.error") })
+      return
+    }
+
+    resetAdd()
+    await select(conn, true)
+  }
+
+  async function handleEdit(original: ServerConnection.Any, value: string) {
+    if (store.editServer.busy || original.type !== "http") return
+    const normalized = normalizeServerUrl(value)
+    if (!normalized) {
+      resetEdit()
+      return
+    }
+
+    const name = store.editServer.name.trim() || undefined
+    const username = store.editServer.username || undefined
+    const password = store.editServer.password || undefined
+    const existingName = original.displayName
+    if (
+      normalized === original.http.url &&
+      name === existingName &&
+      username === original.http.username &&
+      password === original.http.password
+    ) {
+      resetEdit()
+      return
+    }
+
+    setStore("editServer", { busy: true, error: "" })
+
+    const conn: ServerConnection.Http = {
+      type: "http",
+      displayName: name,
+      http: { url: normalized, username, password },
+    }
+    const result = await checkServerHealth(conn.http, fetcher)
+    setStore("editServer", { busy: false })
+    if (!result.healthy) {
+      setStore("editServer", { error: language.t("dialog.server.add.error") })
+      return
+    }
+    if (normalized === original.http.url) {
+      addHttp(conn)
+    } else {
+      replaceServer(original, conn)
+    }
+
+    resetEdit()
   }
 
   const mode = createMemo<"list" | "add" | "edit">(() => {
@@ -441,7 +444,7 @@ export function DialogSelectServer() {
       showForm: true,
       url: "",
       name: "",
-      username: DEFAULT_USERNAME,
+      username: "",
       password: "",
       error: "",
       status: undefined,
@@ -458,26 +461,23 @@ export function DialogSelectServer() {
       password: conn.http.password ?? "",
       error: "",
       status: store.status[ServerConnection.key(conn)]?.healthy,
+      busy: false,
     })
   }
 
   const submitForm = () => {
     if (mode() === "add") {
-      if (addMutation.isPending) return
-      setStore("addServer", { error: "" })
-      addMutation.mutate(store.addServer.url)
+      void handleAdd(store.addServer.url)
       return
     }
     const original = editing()
     if (!original) return
-    if (editMutation.isPending) return
-    setStore("editServer", { error: "" })
-    editMutation.mutate({ original, value: store.editServer.value })
+    void handleEdit(original, store.editServer.value)
   }
 
   const isFormMode = createMemo(() => mode() !== "list")
   const isAddMode = createMemo(() => mode() === "add")
-  const formBusy = createMemo(() => (isAddMode() ? addMutation.isPending : editMutation.isPending))
+  const formBusy = createMemo(() => (isAddMode() ? store.addServer.adding : store.editServer.busy))
 
   const formTitle = createMemo(() => {
     if (!isFormMode()) return language.t("dialog.server.title")
@@ -497,8 +497,8 @@ export function DialogSelectServer() {
 
   async function handleRemove(url: ServerConnection.Key) {
     server.remove(url)
-    if ((await platform.getDefaultServer?.()) === url) {
-      platform.setDefaultServer?.(null)
+    if ((await platform.getDefaultServerUrl?.()) === url) {
+      platform.setDefaultServerUrl?.(null)
     }
   }
 
@@ -539,7 +539,7 @@ export function DialogSelectServer() {
               if (x) select(x)
             }}
             divider={true}
-            class="px-5 [&_[data-slot=list-search-wrapper]]:w-full [&_[data-slot=list-scroll]]h-[300px] [&_[data-slot=list-scroll]]:overflow-y-auto [&_[data-slot=list-items]]:bg-surface-base [&_[data-slot=list-items]]:rounded-md [&_[data-slot=list-item]]:min-h-14 [&_[data-slot=list-item]]:p-3 [&_[data-slot=list-item]]:!bg-transparent"
+            class="px-5 [&_[data-slot=list-search-wrapper]]:w-full [&_[data-slot=list-scroll]]h-[300px] [&_[data-slot=list-scroll]]:overflow-y-auto [&_[data-slot=list-items]]:bg-surface-raised-base [&_[data-slot=list-items]]:rounded-md [&_[data-slot=list-item]]:min-h-14 [&_[data-slot=list-item]]:p-3 [&_[data-slot=list-item]]:!bg-transparent"
           >
             {(i) => {
               const key = ServerConnection.key(i)
@@ -554,7 +554,7 @@ export function DialogSelectServer() {
                     status={store.status[key]}
                     class="flex items-center gap-3 min-w-0 flex-1"
                     badge={
-                      <Show when={defaultKey() === ServerConnection.key(i)}>
+                      <Show when={defaultUrl() === i.http.url}>
                         <span class="text-text-base bg-surface-base text-14-regular px-1.5 rounded-xs">
                           {language.t("dialog.server.status.default")}
                         </span>
@@ -587,14 +587,14 @@ export function DialogSelectServer() {
                             >
                               <DropdownMenu.ItemLabel>{language.t("dialog.server.menu.edit")}</DropdownMenu.ItemLabel>
                             </DropdownMenu.Item>
-                            <Show when={canDefault() && defaultKey() !== key}>
-                              <DropdownMenu.Item onSelect={() => setDefault(key)}>
+                            <Show when={canDefault() && defaultUrl() !== i.http.url}>
+                              <DropdownMenu.Item onSelect={() => setDefault(i.http.url)}>
                                 <DropdownMenu.ItemLabel>
                                   {language.t("dialog.server.menu.default")}
                                 </DropdownMenu.ItemLabel>
                               </DropdownMenu.Item>
                             </Show>
-                            <Show when={canDefault() && defaultKey() === key}>
+                            <Show when={canDefault() && defaultUrl() === i.http.url}>
                               <DropdownMenu.Item onSelect={() => setDefault(null)}>
                                 <DropdownMenu.ItemLabel>
                                   {language.t("dialog.server.menu.defaultRemove")}

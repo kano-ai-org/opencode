@@ -10,9 +10,14 @@ import {
   type ParentProps,
   Show,
 } from "solid-js"
-import { useLanguage } from "@/context/language"
-import { type ServerConnection, serverName } from "@/context/server"
+import { type ServerConnection } from "@/context/server"
 import type { ServerHealth } from "@/utils/server-health"
+
+function nameOf(conn?: ServerConnection.Any, ignoreDisplayName = false) {
+  if (!conn) return ""
+  if (conn.displayName && !ignoreDisplayName) return conn.displayName
+  return conn.http.url.replace(/^https?:\/\//, "").replace(/\/+$/, "")
+}
 
 interface ServerRowProps extends ParentProps {
   conn: ServerConnection.Any
@@ -26,11 +31,10 @@ interface ServerRowProps extends ParentProps {
 }
 
 export function ServerRow(props: ServerRowProps) {
-  const language = useLanguage()
   const [truncated, setTruncated] = createSignal(false)
   let nameRef: HTMLSpanElement | undefined
   let versionRef: HTMLSpanElement | undefined
-  const name = createMemo(() => serverName(props.conn))
+  const name = createMemo(() => nameOf(props.conn))
 
   const check = () => {
     const nameTruncated = nameRef ? nameRef.scrollWidth > nameRef.clientWidth : false
@@ -56,7 +60,7 @@ export function ServerRow(props: ServerRowProps) {
 
   const tooltipValue = () => (
     <span class="flex items-center gap-2">
-      <span>{serverName(props.conn, true)}</span>
+      <span>{nameOf(props.conn, true)}</span>
       <Show when={props.status?.version}>
         <span class="text-text-invert-weak">v{props.status?.version}</span>
       </Show>
@@ -67,26 +71,22 @@ export function ServerRow(props: ServerRowProps) {
 
   return (
     <Tooltip
-      class="flex-1 min-w-0"
+      class="flex-1"
       value={tooltipValue()}
-      contentStyle={{ "max-width": "none", "white-space": "nowrap" }}
       placement="top-start"
       inactive={!truncated() && !props.conn.displayName}
     >
       <div class={props.class} classList={{ "opacity-50": props.dimmed }}>
-        <div class="flex flex-col items-start min-w-0 w-full">
-          <div class="flex flex-row items-center gap-2 min-w-0 w-full">
-            <span ref={nameRef} class={`${props.nameClass ?? "truncate"} min-w-0`}>
+        <div class="flex flex-col items-start">
+          <div class="flex flex-row items-center gap-2">
+            <span ref={nameRef} class={props.nameClass ?? "truncate"}>
               {name()}
             </span>
             <Show
               when={badge()}
               fallback={
                 <Show when={props.status?.version}>
-                  <span
-                    ref={versionRef}
-                    class={`${props.versionClass ?? "text-text-weak text-14-regular truncate"} min-w-0`}
-                  >
+                  <span ref={versionRef} class={props.versionClass ?? "text-text-weak text-14-regular truncate"}>
                     v{props.status?.version}
                   </span>
                 </Show>
@@ -102,7 +102,7 @@ export function ServerRow(props: ServerRowProps) {
                   {conn().http.username ? (
                     <span class="text-text-weak">{conn().http.username}</span>
                   ) : (
-                    <span class="text-text-weaker">{language.t("server.row.noUsername")}</span>
+                    <span class="text-text-weaker">no username</span>
                   )}
                 </span>
                 {conn().http.password && <span class="text-text-weak">••••••••</span>}

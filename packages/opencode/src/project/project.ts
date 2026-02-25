@@ -1,26 +1,27 @@
 import z from "zod"
-import { and, Database, eq } from "../storage/db"
+import { Filesystem } from "../util/filesystem"
+import path from "path"
+import { Database, eq, and, NotFoundError } from "../storage/db"
 import { ProjectTable } from "./project.sql"
 import { SessionTable } from "../session/session.sql"
 import { Log } from "../util/log"
 import { Flag } from "@/flag/flag"
+import { work } from "../util/queue"
+import { fn } from "@opencode-ai/util/fn"
 import { BusEvent } from "@/bus/bus-event"
+import { iife } from "@/util/iife"
 import { GlobalBus } from "@/bus/global"
-import { which } from "../util/which"
-import { ProjectID } from "./schema"
-import { Effect, Layer, Path, Scope, ServiceMap, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { NodeFileSystem, NodePath } from "@effect/platform-node"
-import { makeRuntime } from "@/effect/run-service"
-import { AppFileSystem } from "@/filesystem"
-import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
+import { existsSync } from "fs"
+
+import { realpath } from "fs/promises"
+import { git } from "../util/git"
 
 export namespace Project {
   const log = Log.create({ service: "project" })
 
   export const Info = z
     .object({
-      id: ProjectID.zod,
+      id: z.string(),
       worktree: z.string(),
       vcs: z.literal("git").optional(),
       name: z.string().optional(),
@@ -52,12 +53,87 @@ export namespace Project {
     Updated: BusEvent.define("project.updated", Info),
   }
 
+  export const WorkspaceToggles = z
+    .object({
+      version: z.number().int().nonnegative(),
+      toggles: z.record(z.string(), z.boolean()),
+    })
+    .meta({
+      ref: "ProjectWorkspaceToggles",
+    })
+
+  export const WorkspaceTogglesInput = z.object({
+    projectID: z.string(),
+    version: z.number().int().nonnegative(),
+    toggles: z.record(z.string(), z.boolean()),
+  })
+
   type Row = typeof ProjectTable.$inferSelect
+
+  const pathkey = (directory: string) => {
+    const normalized = directory.replace(/\\/g, "/").replace(/\/+$/, "")
+    if (!/^[A-Za-z]:\//.test(normalized)) return normalized
+    return `${normalized.slice(0, 1).toUpperCase()}${normalized.slice(1).toLowerCase()}`
+  }
+
+  const canonical = (directory: string) =>
+    realpath(directory)
+      .then(pathkey)
+      .catch(() => pathkey(directory))
+
+  const sanitizeWorkspaceToggles = (row: Row, toggles: Record<string, boolean>) => {
+    const allowed = new Set([row.worktree, ...row.sandboxes])
+    return Object.fromEntries(Object.entries(toggles).filter(([directory]) => allowed.has(directory)))
+  }
+
+  const sanitizeWorkspaceTogglesInput = async (row: Row, toggles: Record<string, boolean>) => {
+    const allowed = [row.worktree, ...row.sandboxes]
+    const aliases = await Promise.all(allowed.map((directory) => canonical(directory).then((key) => [key, directory] as const)))
+    const map = new Map(aliases)
+    const direct = new Map(allowed.map((directory) => [pathkey(directory), directory] as const))
+    const tail = allowed.reduce<Map<string, string | undefined>>((acc, directory) => {
+      const name = path.basename(directory.replace(/\\/g, "/")).toLowerCase()
+      if (!name) return acc
+      if (!acc.has(name)) {
+        acc.set(name, directory)
+        return acc
+      }
+      acc.set(name, undefined)
+      return acc
+    }, new Map())
+
+    const resolved = await Promise.all(
+      Object.entries(toggles).map(async ([directory, enabled]) => {
+        const key = await canonical(directory)
+        const byCanonical = map.get(key)
+        if (byCanonical) return [byCanonical, enabled] as const
+
+        const byDirect = direct.get(pathkey(directory))
+        if (byDirect) return [byDirect, enabled] as const
+
+        const name = path.basename(directory.replace(/\\/g, "/")).toLowerCase()
+        const byTail = tail.get(name)
+        const target = byTail && allowed.includes(byTail) ? byTail : undefined
+        if (!target) return
+        return [target, enabled] as const
+      }),
+    )
+
+    return Object.fromEntries(resolved.filter((item): item is readonly [string, boolean] => !!item))
+  }
+
+  const workspaceTogglesFromRow = (row: Row) => {
+    const toggles = sanitizeWorkspaceToggles(row, row.workspace_toggles ?? {})
+    return {
+      version: row.workspace_toggles_version,
+      toggles,
+    }
+  }
 
   export function fromRow(row: Row): Info {
     const icon =
-      row.icon_url || row.icon_color
-        ? { url: row.icon_url ?? undefined, color: row.icon_color ?? undefined }
+      row.icon_url || row.icon_override || row.icon_color
+        ? { url: row.icon_url ?? undefined, override: row.icon_override ?? undefined, color: row.icon_color ?? undefined }
         : undefined
     return {
       id: row.id,
@@ -75,404 +151,262 @@ export namespace Project {
     }
   }
 
-  export const UpdateInput = z.object({
-    projectID: ProjectID.zod,
-    name: z.string().optional(),
-    icon: Info.shape.icon.optional(),
-    commands: Info.shape.commands.optional(),
-  })
-  export type UpdateInput = z.infer<typeof UpdateInput>
+  export async function fromDirectory(directory: string) {
+    log.info("fromDirectory", { directory })
 
-  // ---------------------------------------------------------------------------
-  // Effect service
-  // ---------------------------------------------------------------------------
+    const data = await iife(async () => {
+      const matches = Filesystem.up({ targets: [".git"], start: directory })
+      const dotgit = await matches.next().then((x) => x.value)
+      await matches.return()
+      if (dotgit) {
+        let sandbox = path.dirname(dotgit)
 
-  export interface Interface {
-    readonly fromDirectory: (directory: string) => Effect.Effect<{ project: Info; sandbox: string }>
-    readonly discover: (input: Info) => Effect.Effect<void>
-    readonly list: () => Effect.Effect<Info[]>
-    readonly get: (id: ProjectID) => Effect.Effect<Info | undefined>
-    readonly update: (input: UpdateInput) => Effect.Effect<Info>
-    readonly initGit: (input: { directory: string; project: Info }) => Effect.Effect<Info>
-    readonly setInitialized: (id: ProjectID) => Effect.Effect<void>
-    readonly sandboxes: (id: ProjectID) => Effect.Effect<string[]>
-    readonly addSandbox: (id: ProjectID, directory: string) => Effect.Effect<void>
-    readonly removeSandbox: (id: ProjectID, directory: string) => Effect.Effect<void>
-  }
+        const gitBinary = Bun.which("git")
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Project") {}
+        // cached id calculation
+        let id = await Bun.file(path.join(dotgit, "opencode"))
+          .text()
+          .then((x) => x.trim())
+          .catch(() => undefined)
 
-  type GitResult = { code: number; text: string; stderr: string }
+        if (!gitBinary) {
+          return {
+            id: id ?? "global",
+            worktree: sandbox,
+            sandbox: sandbox,
+            vcs: Info.shape.vcs.parse(Flag.OPENCODE_FAKE_VCS),
+          }
+        }
 
-  export const layer: Layer.Layer<
-    Service,
-    never,
-    AppFileSystem.Service | Path.Path | ChildProcessSpawner.ChildProcessSpawner
-  > = Layer.effect(
-    Service,
-    Effect.gen(function* () {
-      const fs = yield* AppFileSystem.Service
-      const pathSvc = yield* Path.Path
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        // generate id from root commit
+        if (!id) {
+          const roots = await git(["rev-list", "--max-parents=0", "--all"], {
+            cwd: sandbox,
+          })
+            .then(async (result) =>
+              (await result.text())
+                .split("\n")
+                .filter(Boolean)
+                .map((x) => x.trim())
+                .toSorted(),
+            )
+            .catch(() => undefined)
 
-      const git = Effect.fnUntraced(
-        function* (args: string[], opts?: { cwd?: string }) {
-          const handle = yield* spawner.spawn(
-            ChildProcess.make("git", args, { cwd: opts?.cwd, extendEnv: true, stdin: "ignore" }),
-          )
-          const [text, stderr] = yield* Effect.all(
-            [Stream.mkString(Stream.decodeText(handle.stdout)), Stream.mkString(Stream.decodeText(handle.stderr))],
-            { concurrency: 2 },
-          )
-          const code = yield* handle.exitCode
-          return { code, text, stderr } satisfies GitResult
-        },
-        Effect.scoped,
-        Effect.catch(() => Effect.succeed({ code: 1, text: "", stderr: "" } satisfies GitResult)),
-      )
+          if (!roots) {
+            return {
+              id: "global",
+              worktree: sandbox,
+              sandbox: sandbox,
+              vcs: Info.shape.vcs.parse(Flag.OPENCODE_FAKE_VCS),
+            }
+          }
 
-      const db = <T>(fn: (d: Parameters<typeof Database.use>[0] extends (trx: infer D) => any ? D : never) => T) =>
-        Effect.sync(() => Database.use(fn))
+          id = roots[0]
+          if (id) {
+            void Bun.file(path.join(dotgit, "opencode"))
+              .write(id)
+              .catch(() => undefined)
+          }
+        }
 
-      const emitUpdated = (data: Info) =>
-        Effect.sync(() =>
-          GlobalBus.emit("event", {
-            payload: { type: Event.Updated.type, properties: data },
-          }),
-        )
+        if (!id) {
+          return {
+            id: "global",
+            worktree: sandbox,
+            sandbox: sandbox,
+            vcs: "git",
+          }
+        }
 
-      const fakeVcs = Info.shape.vcs.parse(Flag.OPENCODE_FAKE_VCS)
+        const top = await git(["rev-parse", "--show-toplevel"], {
+          cwd: sandbox,
+        })
+          .then(async (result) => path.resolve(sandbox, (await result.text()).trim()))
+          .catch(() => undefined)
 
-      const resolveGitPath = (cwd: string, name: string) => {
-        if (!name) return cwd
-        name = name.replace(/[\r\n]+$/, "")
-        if (!name) return cwd
-        name = AppFileSystem.windowsPath(name)
-        if (pathSvc.isAbsolute(name)) return pathSvc.normalize(name)
-        return pathSvc.resolve(cwd, name)
+        if (!top) {
+          return {
+            id,
+            sandbox,
+            worktree: sandbox,
+            vcs: Info.shape.vcs.parse(Flag.OPENCODE_FAKE_VCS),
+          }
+        }
+
+        sandbox = top
+
+        const worktree = await git(["rev-parse", "--git-common-dir"], {
+          cwd: sandbox,
+        })
+          .then(async (result) => {
+            const dirname = path.dirname((await result.text()).trim())
+            if (dirname === ".") return sandbox
+            return dirname
+          })
+          .catch(() => undefined)
+
+        if (!worktree) {
+          return {
+            id,
+            sandbox,
+            worktree: sandbox,
+            vcs: Info.shape.vcs.parse(Flag.OPENCODE_FAKE_VCS),
+          }
+        }
+
+        return {
+          id,
+          sandbox,
+          worktree,
+          vcs: "git",
+        }
       }
 
-      const scope = yield* Scope.Scope
+      return {
+        id: "global",
+        worktree: "/",
+        sandbox: "/",
+        vcs: Info.shape.vcs.parse(Flag.OPENCODE_FAKE_VCS),
+      }
+    })
 
-      const readCachedProjectId = Effect.fnUntraced(function* (dir: string) {
-        return yield* fs.readFileString(pathSvc.join(dir, "opencode")).pipe(
-          Effect.map((x) => x.trim()),
-          Effect.map(ProjectID.make),
-          Effect.catch(() => Effect.succeed(undefined)),
-        )
-      })
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, data.id)).get())
+    const existing = await iife(async () => {
+      if (row) return fromRow(row)
+      const fresh: Info = {
+        id: data.id,
+        worktree: data.worktree,
+        vcs: data.vcs as Info["vcs"],
+        sandboxes: [],
+        time: {
+          created: Date.now(),
+          updated: Date.now(),
+        },
+      }
+      if (data.id !== "global") {
+        await migrateFromGlobal(data.id, data.worktree)
+      }
+      return fresh
+    })
 
-      const fromDirectory = Effect.fn("Project.fromDirectory")(function* (directory: string) {
-        log.info("fromDirectory", { directory })
+    if (Flag.OPENCODE_EXPERIMENTAL_ICON_DISCOVERY) discover(existing)
 
-        // Phase 1: discover git info
-        type DiscoveryResult = { id: ProjectID; worktree: string; sandbox: string; vcs: Info["vcs"] }
-
-        const data: DiscoveryResult = yield* Effect.gen(function* () {
-          const dotgitMatches = yield* fs.up({ targets: [".git"], start: directory }).pipe(Effect.orDie)
-          const dotgit = dotgitMatches[0]
-
-          if (!dotgit) {
-            return {
-              id: ProjectID.global,
-              worktree: "/",
-              sandbox: "/",
-              vcs: fakeVcs,
-            }
-          }
-
-          let sandbox = pathSvc.dirname(dotgit)
-          const gitBinary = yield* Effect.sync(() => which("git"))
-          let id = yield* readCachedProjectId(dotgit)
-
-          if (!gitBinary) {
-            return {
-              id: id ?? ProjectID.global,
-              worktree: sandbox,
-              sandbox,
-              vcs: fakeVcs,
-            }
-          }
-
-          const commonDir = yield* git(["rev-parse", "--git-common-dir"], { cwd: sandbox })
-          if (commonDir.code !== 0) {
-            return {
-              id: id ?? ProjectID.global,
-              worktree: sandbox,
-              sandbox,
-              vcs: fakeVcs,
-            }
-          }
-          const worktree = (() => {
-            const common = resolveGitPath(sandbox, commonDir.text.trim())
-            return common === sandbox ? sandbox : pathSvc.dirname(common)
-          })()
-
-          if (id == null) {
-            id = yield* readCachedProjectId(pathSvc.join(worktree, ".git"))
-          }
-
-          if (!id) {
-            const revList = yield* git(["rev-list", "--max-parents=0", "HEAD"], { cwd: sandbox })
-            const roots = revList.text
-              .split("\n")
-              .filter(Boolean)
-              .map((x) => x.trim())
-              .toSorted()
-
-            id = roots[0] ? ProjectID.make(roots[0]) : undefined
-            if (id) {
-              yield* fs.writeFileString(pathSvc.join(worktree, ".git", "opencode"), id).pipe(Effect.ignore)
-            }
-          }
-
-          if (!id) {
-            return { id: ProjectID.global, worktree: sandbox, sandbox, vcs: "git" as const }
-          }
-
-          const topLevel = yield* git(["rev-parse", "--show-toplevel"], { cwd: sandbox })
-          if (topLevel.code !== 0) {
-            return {
-              id,
-              worktree: sandbox,
-              sandbox,
-              vcs: fakeVcs,
-            }
-          }
-          sandbox = resolveGitPath(sandbox, topLevel.text.trim())
-
-          return { id, sandbox, worktree, vcs: "git" as const }
-        })
-
-        // Phase 2: upsert
-        const row = yield* db((d) => d.select().from(ProjectTable).where(eq(ProjectTable.id, data.id)).get())
-        const existing = row
-          ? fromRow(row)
-          : {
-              id: data.id,
-              worktree: data.worktree,
-              vcs: data.vcs,
-              sandboxes: [] as string[],
-              time: { created: Date.now(), updated: Date.now() },
-            }
-
-        if (Flag.OPENCODE_EXPERIMENTAL_ICON_DISCOVERY)
-          yield* discover(existing).pipe(Effect.ignore, Effect.forkIn(scope))
-
-        const result: Info = {
-          ...existing,
-          worktree: data.worktree,
-          vcs: data.vcs,
-          time: { ...existing.time, updated: Date.now() },
-        }
-        if (data.sandbox !== result.worktree && !result.sandboxes.includes(data.sandbox))
-          result.sandboxes.push(data.sandbox)
-        result.sandboxes = yield* Effect.forEach(
-          result.sandboxes,
-          (s) =>
-            fs.exists(s).pipe(
-              Effect.orDie,
-              Effect.map((exists) => (exists ? s : undefined)),
-            ),
-          { concurrency: "unbounded" },
-        ).pipe(Effect.map((arr) => arr.filter((x): x is string => x !== undefined)))
-
-        yield* db((d) =>
-          d
-            .insert(ProjectTable)
-            .values({
-              id: result.id,
-              worktree: result.worktree,
-              vcs: result.vcs ?? null,
-              name: result.name,
-              icon_url: result.icon?.url,
-              icon_color: result.icon?.color,
-              time_created: result.time.created,
-              time_updated: result.time.updated,
-              time_initialized: result.time.initialized,
-              sandboxes: result.sandboxes,
-              commands: result.commands,
-            })
-            .onConflictDoUpdate({
-              target: ProjectTable.id,
-              set: {
-                worktree: result.worktree,
-                vcs: result.vcs ?? null,
-                name: result.name,
-                icon_url: result.icon?.url,
-                icon_color: result.icon?.color,
-                time_updated: result.time.updated,
-                time_initialized: result.time.initialized,
-                sandboxes: result.sandboxes,
-                commands: result.commands,
-              },
-            })
-            .run(),
-        )
-
-        if (data.id !== ProjectID.global) {
-          yield* db((d) =>
-            d
-              .update(SessionTable)
-              .set({ project_id: data.id })
-              .where(and(eq(SessionTable.project_id, ProjectID.global), eq(SessionTable.directory, data.worktree)))
-              .run(),
-          )
-        }
-
-        yield* emitUpdated(result)
-        return { project: result, sandbox: data.sandbox }
-      })
-
-      const discover = Effect.fn("Project.discover")(function* (input: Info) {
-        if (input.vcs !== "git") return
-        if (input.icon?.override) return
-        if (input.icon?.url) return
-
-        const matches = yield* fs
-          .glob("**/favicon.{ico,png,svg,jpg,jpeg,webp}", {
-            cwd: input.worktree,
-            absolute: true,
-            include: "file",
-          })
-          .pipe(Effect.orDie)
-        const shortest = matches.sort((a, b) => a.length - b.length)[0]
-        if (!shortest) return
-
-        const buffer = yield* fs.readFile(shortest).pipe(Effect.orDie)
-        const base64 = Buffer.from(buffer).toString("base64")
-        const mime = AppFileSystem.mimeType(shortest)
-        const url = `data:${mime};base64,${base64}`
-        yield* update({ projectID: input.id, icon: { url } })
-      })
-
-      const list = Effect.fn("Project.list")(function* () {
-        return yield* db((d) => d.select().from(ProjectTable).all().map(fromRow))
-      })
-
-      const get = Effect.fn("Project.get")(function* (id: ProjectID) {
-        const row = yield* db((d) => d.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
-        return row ? fromRow(row) : undefined
-      })
-
-      const update = Effect.fn("Project.update")(function* (input: UpdateInput) {
-        const result = yield* db((d) =>
-          d
-            .update(ProjectTable)
-            .set({
-              name: input.name,
-              icon_url: input.icon?.url,
-              icon_color: input.icon?.color,
-              commands: input.commands,
-              time_updated: Date.now(),
-            })
-            .where(eq(ProjectTable.id, input.projectID))
-            .returning()
-            .get(),
-        )
-        if (!result) throw new Error(`Project not found: ${input.projectID}`)
-        const data = fromRow(result)
-        yield* emitUpdated(data)
-        return data
-      })
-
-      const initGit = Effect.fn("Project.initGit")(function* (input: { directory: string; project: Info }) {
-        if (input.project.vcs === "git") return input.project
-        if (!(yield* Effect.sync(() => which("git")))) throw new Error("Git is not installed")
-        const result = yield* git(["init", "--quiet"], { cwd: input.directory })
-        if (result.code !== 0) {
-          throw new Error(result.stderr.trim() || result.text.trim() || "Failed to initialize git repository")
-        }
-        const { project } = yield* fromDirectory(input.directory)
-        return project
-      })
-
-      const setInitialized = Effect.fn("Project.setInitialized")(function* (id: ProjectID) {
-        yield* db((d) =>
-          d.update(ProjectTable).set({ time_initialized: Date.now() }).where(eq(ProjectTable.id, id)).run(),
-        )
-      })
-
-      const sandboxes = Effect.fn("Project.sandboxes")(function* (id: ProjectID) {
-        const row = yield* db((d) => d.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
-        if (!row) return []
-        const data = fromRow(row)
-        return yield* Effect.forEach(
-          data.sandboxes,
-          (dir) =>
-            fs.isDir(dir).pipe(
-              Effect.orDie,
-              Effect.map((ok) => (ok ? dir : undefined)),
-            ),
-          { concurrency: "unbounded" },
-        ).pipe(Effect.map((arr) => arr.filter((x): x is string => x !== undefined)))
-      })
-
-      const addSandbox = Effect.fn("Project.addSandbox")(function* (id: ProjectID, directory: string) {
-        const row = yield* db((d) => d.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
-        if (!row) throw new Error(`Project not found: ${id}`)
-        const sboxes = [...row.sandboxes]
-        if (!sboxes.includes(directory)) sboxes.push(directory)
-        const result = yield* db((d) =>
-          d
-            .update(ProjectTable)
-            .set({ sandboxes: sboxes, time_updated: Date.now() })
-            .where(eq(ProjectTable.id, id))
-            .returning()
-            .get(),
-        )
-        if (!result) throw new Error(`Project not found: ${id}`)
-        yield* emitUpdated(fromRow(result))
-      })
-
-      const removeSandbox = Effect.fn("Project.removeSandbox")(function* (id: ProjectID, directory: string) {
-        const row = yield* db((d) => d.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
-        if (!row) throw new Error(`Project not found: ${id}`)
-        const sboxes = row.sandboxes.filter((s) => s !== directory)
-        const result = yield* db((d) =>
-          d
-            .update(ProjectTable)
-            .set({ sandboxes: sboxes, time_updated: Date.now() })
-            .where(eq(ProjectTable.id, id))
-            .returning()
-            .get(),
-        )
-        if (!result) throw new Error(`Project not found: ${id}`)
-        yield* emitUpdated(fromRow(result))
-      })
-
-      return Service.of({
-        fromDirectory,
-        discover,
-        list,
-        get,
-        update,
-        initGit,
-        setInitialized,
-        sandboxes,
-        addSandbox,
-        removeSandbox,
-      })
-    }),
-  )
-
-  export const defaultLayer = layer.pipe(
-    Layer.provide(CrossSpawnSpawner.defaultLayer),
-    Layer.provide(AppFileSystem.defaultLayer),
-    Layer.provide(NodePath.layer),
-  )
-  const { runPromise } = makeRuntime(Service, defaultLayer)
-
-  // ---------------------------------------------------------------------------
-  // Promise-based API (delegates to Effect service via runPromise)
-  // ---------------------------------------------------------------------------
-
-  export function fromDirectory(directory: string) {
-    return runPromise((svc) => svc.fromDirectory(directory))
+    const result: Info = {
+      ...existing,
+      worktree: data.worktree,
+      vcs: data.vcs as Info["vcs"],
+      time: {
+        ...existing.time,
+        updated: Date.now(),
+      },
+    }
+    if (data.sandbox !== result.worktree && !result.sandboxes.includes(data.sandbox))
+      result.sandboxes.push(data.sandbox)
+    result.sandboxes = result.sandboxes.filter((x) => existsSync(x))
+    const insert = {
+      id: result.id,
+      worktree: result.worktree,
+      vcs: result.vcs ?? null,
+      name: result.name,
+      icon_url: result.icon?.url,
+      icon_override: result.icon?.override,
+      icon_color: result.icon?.color,
+      time_created: result.time.created,
+      time_updated: result.time.updated,
+      time_initialized: result.time.initialized,
+      sandboxes: result.sandboxes,
+      workspace_toggles: row?.workspace_toggles ?? {},
+      workspace_toggles_version: row?.workspace_toggles_version ?? 0,
+      commands: result.commands,
+    }
+    const updateSet = {
+      worktree: result.worktree,
+      vcs: result.vcs ?? null,
+      name: result.name,
+      icon_url: result.icon?.url,
+      icon_override: result.icon?.override,
+      icon_color: result.icon?.color,
+      time_updated: result.time.updated,
+      time_initialized: result.time.initialized,
+      sandboxes: result.sandboxes,
+      workspace_toggles: row?.workspace_toggles ?? {},
+      workspace_toggles_version: row?.workspace_toggles_version ?? 0,
+      commands: result.commands,
+    }
+    Database.use((db) =>
+      db.insert(ProjectTable).values(insert).onConflictDoUpdate({ target: ProjectTable.id, set: updateSet }).run(),
+    )
+    GlobalBus.emit("event", {
+      payload: {
+        type: Event.Updated.type,
+        properties: result,
+      },
+    })
+    return { project: result, sandbox: data.sandbox }
   }
 
-  export function discover(input: Info) {
-    return runPromise((svc) => svc.discover(input))
+  export async function discover(input: Info) {
+    if (input.vcs !== "git") return
+    if (input.icon?.override) return
+    if (input.icon?.url) return
+    const glob = new Bun.Glob("**/{favicon}.{ico,png,svg,jpg,jpeg,webp}")
+    const matches = await Array.fromAsync(
+      glob.scan({
+        cwd: input.worktree,
+        absolute: true,
+        onlyFiles: true,
+        followSymlinks: false,
+        dot: false,
+      }),
+    )
+    const shortest = matches.sort((a, b) => a.length - b.length)[0]
+    if (!shortest) return
+    const file = Bun.file(shortest)
+    const buffer = await file.arrayBuffer()
+    const base64 = Buffer.from(buffer).toString("base64")
+    const mime = file.type || "image/png"
+    const url = `data:${mime};base64,${base64}`
+    await update({
+      projectID: input.id,
+      icon: {
+        url,
+      },
+    })
+    return
+  }
+
+  async function migrateFromGlobal(id: string, worktree: string) {
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, "global")).get())
+    if (!row) return
+
+    const sessions = Database.use((db) =>
+      db.select().from(SessionTable).where(eq(SessionTable.project_id, "global")).all(),
+    )
+    if (sessions.length === 0) return
+
+    log.info("migrating sessions from global", { newProjectID: id, worktree, count: sessions.length })
+
+    await work(10, sessions, async (row) => {
+      // Skip sessions that belong to a different directory
+      if (row.directory && row.directory !== worktree) return
+
+      log.info("migrating session", { sessionID: row.id, from: "global", to: id })
+      Database.use((db) => db.update(SessionTable).set({ project_id: id }).where(eq(SessionTable.id, row.id)).run())
+    }).catch((error) => {
+      log.error("failed to migrate sessions from global to project", { error, projectId: id })
+    })
+  }
+
+  export function setInitialized(id: string) {
+    Database.use((db) =>
+      db
+        .update(ProjectTable)
+        .set({
+          time_initialized: Date.now(),
+        })
+        .where(eq(ProjectTable.id, id))
+        .run(),
+    )
   }
 
   export function list() {
@@ -485,35 +419,182 @@ export namespace Project {
     )
   }
 
-  export function get(id: ProjectID): Info | undefined {
+  export function get(id: string): Info | undefined {
     const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
     if (!row) return undefined
     return fromRow(row)
   }
 
-  export function setInitialized(id: ProjectID) {
-    Database.use((db) =>
-      db.update(ProjectTable).set({ time_initialized: Date.now() }).where(eq(ProjectTable.id, id)).run(),
+  export async function initGit(input: { directory: string; project: Info }) {
+    if (input.project.vcs === "git") return input.project
+    if (!which("git")) throw new Error("Git is not installed")
+
+    const result = await git(["init", "--quiet"], {
+      cwd: input.directory,
+    })
+    if (result.exitCode !== 0) {
+      const text = result.stderr.toString().trim() || result.text().trim()
+      throw new Error(text || "Failed to initialize git repository")
+    }
+
+    return (await fromDirectory(input.directory)).project
+  }
+
+  export const update = fn(
+    z.object({
+      projectID: z.string(),
+      name: z.string().optional(),
+      icon: Info.shape.icon.optional(),
+      commands: Info.shape.commands.optional(),
+    }),
+    async (input) => {
+      const result = Database.use((db) =>
+        db
+        .update(ProjectTable)
+        .set({
+          name: input.name,
+          icon_url: input.icon?.url,
+          icon_override: input.icon?.override,
+          icon_color: input.icon?.color,
+          commands: input.commands,
+          time_updated: Date.now(),
+          })
+          .where(eq(ProjectTable.id, input.projectID))
+          .returning()
+          .get(),
+      )
+      if (!result) throw new Error(`Project not found: ${input.projectID}`)
+      const data = fromRow(result)
+      GlobalBus.emit("event", {
+        payload: {
+          type: Event.Updated.type,
+          properties: data,
+        },
+      })
+      return data
+    },
+  )
+
+  export const remove = fn(z.object({ projectID: z.string() }), async ({ projectID }) => {
+    if (projectID === "global") {
+      throw new Error("cannot delete global project")
+    }
+
+    const removed = Database.use((db) => db.delete(ProjectTable).where(eq(ProjectTable.id, projectID)).returning().get())
+    if (!removed) throw new NotFoundError({ message: `Project not found: ${projectID}` })
+
+    return true
+  })
+
+  export function getWorkspaceToggles(projectID: string) {
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, projectID)).get())
+    if (!row) {
+      throw new NotFoundError({ message: `Project not found: ${projectID}` })
+    }
+    return WorkspaceToggles.parse(workspaceTogglesFromRow(row))
+  }
+
+  export const updateWorkspaceToggles = fn(WorkspaceTogglesInput, async (input) => {
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, input.projectID)).get())
+    if (!row) {
+      throw new NotFoundError({ message: `Project not found: ${input.projectID}` })
+    }
+
+    const current = workspaceTogglesFromRow(row)
+    if (input.version !== current.version) {
+      return {
+        status: 409 as const,
+        data: WorkspaceToggles.parse(current),
+      }
+    }
+
+    const toggles = await sanitizeWorkspaceTogglesInput(row, input.toggles)
+    const nextVersion = current.version + 1
+    const updated = Database.use((db) =>
+      db
+        .update(ProjectTable)
+        .set({
+          workspace_toggles: toggles,
+          workspace_toggles_version: nextVersion,
+          time_updated: Date.now(),
+        })
+        .where(and(eq(ProjectTable.id, input.projectID), eq(ProjectTable.workspace_toggles_version, input.version)))
+        .returning()
+        .get(),
     )
+
+    if (!updated) {
+      const latest = getWorkspaceToggles(input.projectID)
+      return {
+        status: 409 as const,
+        data: latest,
+      }
+    }
+
+    return {
+      status: 200 as const,
+      data: WorkspaceToggles.parse(workspaceTogglesFromRow(updated)),
+    }
+  })
+
+  export async function sandboxes(id: string) {
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
+    if (!row) return []
+    const data = fromRow(row)
+    const valid: string[] = []
+    for (const dir of data.sandboxes) {
+      const stat = await Bun.file(dir)
+        .stat()
+        .catch(() => undefined)
+      if (stat?.isDirectory()) valid.push(dir)
+    }
+    return valid
   }
 
-  export function initGit(input: { directory: string; project: Info }) {
-    return runPromise((svc) => svc.initGit(input))
+  export async function addSandbox(id: string, directory: string) {
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
+    if (!row) throw new Error(`Project not found: ${id}`)
+    const sandboxes = [...row.sandboxes]
+    if (!sandboxes.includes(directory)) sandboxes.push(directory)
+    const result = Database.use((db) =>
+      db
+        .update(ProjectTable)
+        .set({ sandboxes, time_updated: Date.now() })
+        .where(eq(ProjectTable.id, id))
+        .returning()
+        .get(),
+    )
+    if (!result) throw new Error(`Project not found: ${id}`)
+    const data = fromRow(result)
+    GlobalBus.emit("event", {
+      payload: {
+        type: Event.Updated.type,
+        properties: data,
+      },
+    })
+    return data
   }
 
-  export function update(input: UpdateInput) {
-    return runPromise((svc) => svc.update(input))
-  }
-
-  export function sandboxes(id: ProjectID) {
-    return runPromise((svc) => svc.sandboxes(id))
-  }
-
-  export function addSandbox(id: ProjectID, directory: string) {
-    return runPromise((svc) => svc.addSandbox(id, directory))
-  }
-
-  export function removeSandbox(id: ProjectID, directory: string) {
-    return runPromise((svc) => svc.removeSandbox(id, directory))
+  export async function removeSandbox(id: string, directory: string) {
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
+    if (!row) throw new Error(`Project not found: ${id}`)
+    const sandboxes = row.sandboxes.filter((s) => s !== directory)
+    const result = Database.use((db) =>
+      db
+        .update(ProjectTable)
+        .set({ sandboxes, time_updated: Date.now() })
+        .where(eq(ProjectTable.id, id))
+        .returning()
+        .get(),
+    )
+    if (!result) throw new Error(`Project not found: ${id}`)
+    const data = fromRow(result)
+    GlobalBus.emit("event", {
+      payload: {
+        type: Event.Updated.type,
+        properties: data,
+      },
+    })
+    return data
   }
 }
