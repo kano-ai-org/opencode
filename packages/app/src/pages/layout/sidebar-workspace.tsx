@@ -40,6 +40,7 @@ export type WorkspaceSidebarContext = {
   clearHoverProjectSoon: () => void
   prefetchSession: (session: Session, priority?: "high" | "low") => void
   archiveSession: (session: Session) => Promise<void>
+  renameSession: (session: Session, next: string) => Promise<void>
   workspaceName: (directory: string, projectId?: string, branch?: string) => string | undefined
   renameWorkspace: (directory: string, next: string, projectId?: string, branch?: string) => void
   editorOpen: (id: string) => boolean
@@ -277,8 +278,12 @@ const WorkspaceSessionList = (props: {
           clearHoverProjectSoon={props.ctx.clearHoverProjectSoon}
           prefetchSession={props.ctx.prefetchSession}
           archiveSession={props.ctx.archiveSession}
-        />
-      )}
+          renameSession={props.ctx.renameSession}
+          editorOpen={props.ctx.editorOpen}
+          openEditor={props.ctx.openEditor}
+          InlineEditor={props.ctx.InlineEditor}
+         />
+       )}
     </For>
     <Show when={props.hasMore()}>
       <div class="relative w-full py-1">
@@ -509,6 +514,10 @@ export const LocalWorkspace = (props: {
               clearHoverProjectSoon={props.ctx.clearHoverProjectSoon}
               prefetchSession={props.ctx.prefetchSession}
               archiveSession={props.ctx.archiveSession}
+              renameSession={props.ctx.renameSession}
+              editorOpen={props.ctx.editorOpen}
+              openEditor={props.ctx.openEditor}
+              InlineEditor={props.ctx.InlineEditor}
             />
           )}
         </For>

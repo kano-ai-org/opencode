@@ -222,9 +222,12 @@ export function DialogSelectServer() {
     })
   }
 
+  const addHttp = (conn: ServerConnection.Http) =>
+    (server.add as (input: ServerConnection.Http) => ServerConnection.Http | undefined)(conn)
+
   const replaceServer = (original: ServerConnection.Http, next: ServerConnection.Http) => {
     const active = server.key
-    const newConn = server.add(next)
+    const newConn = addHttp(next)
     if (!newConn) return
     const nextActive = active === ServerConnection.key(original) ? ServerConnection.key(newConn) : active
     if (nextActive) server.setActive(nextActive)
@@ -281,7 +284,7 @@ export function DialogSelectServer() {
     if (!persist && store.status[ServerConnection.key(conn)]?.healthy === false) return
     dialog.close()
     if (persist && conn.type === "http") {
-      server.add(conn)
+      addHttp(conn)
       navigate("/")
       return
     }
@@ -411,7 +414,7 @@ export function DialogSelectServer() {
       return
     }
     if (normalized === original.http.url) {
-      server.add(conn)
+      addHttp(conn)
     } else {
       replaceServer(original, conn)
     }

@@ -17,6 +17,8 @@ import { PermissionNext } from "@/permission/next"
 import { errors } from "../error"
 import { lazy } from "../../util/lazy"
 
+import { SessionTransfer } from "@/session/transfer"
+
 const log = Log.create({ service: "server" })
 
 export const SessionRoutes = lazy(() =>
@@ -41,6 +43,7 @@ export const SessionRoutes = lazy(() =>
       validator(
         "query",
         z.object({
+          projectID: z.string().optional().meta({ description: "Filter sessions by project ID" }),
           directory: z.string().optional().meta({ description: "Filter sessions by project directory" }),
           roots: z.coerce.boolean().optional().meta({ description: "Only return root sessions (no parentID)" }),
           start: z.coerce
@@ -55,6 +58,7 @@ export const SessionRoutes = lazy(() =>
         const query = c.req.valid("query")
         const sessions: Session.Info[] = []
         for await (const session of Session.list({
+          projectID: query.projectID,
           directory: query.directory,
           roots: query.roots,
           start: query.start,
@@ -64,6 +68,90 @@ export const SessionRoutes = lazy(() =>
           sessions.push(session)
         }
         return c.json(sessions)
+      },
+    )
+    .get(
+      "/export",
+      describeRoute({
+        summary: "Export sessions",
+        description: "Export projects/sessions/messages into a portable JSON bundle.",
+        operationId: "session.export",
+        responses: {
+          200: {
+            description: "Session export bundle",
+            content: {
+              "application/json": {
+                schema: resolver(z.unknown()),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        return c.json(await SessionTransfer.exportAll())
+      },
+    )
+    .post(
+      "/import",
+      describeRoute({
+        summary: "Import sessions",
+        description: "Import projects/sessions/messages from uploaded file or remote URL.",
+        operationId: "session.import",
+        responses: {
+          200: {
+            description: "Import summary",
+            content: {
+              "application/json": {
+                schema: resolver(z.record(z.string(), z.number())),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      async (c) => {
+        const type = c.req.header("content-type") ?? ""
+
+        if (type.includes("multipart/form-data")) {
+          const form = await c.req.formData()
+          const file = form.get("file")
+          const url = form.get("url")
+
+          if (file instanceof File) {
+            const bytes = new Uint8Array(await file.arrayBuffer())
+            const parsed = SessionTransfer.parse(bytes)
+            return c.json(await SessionTransfer.importAll(parsed))
+          }
+
+          if (typeof url === "string" && url.trim()) {
+            const response = await fetch(url.trim())
+            if (!response.ok) throw new Error(`failed to download import url: ${response.status}`)
+            const bytes = new Uint8Array(await response.arrayBuffer())
+            const parsed = SessionTransfer.parse(bytes)
+            return c.json(await SessionTransfer.importAll(parsed))
+          }
+
+          throw new Error("import requires file or url")
+        }
+
+        const body = await c.req.json().catch(() => undefined)
+        if (!body || typeof body !== "object") throw new Error("invalid import payload")
+
+        const value = body as { url?: string; data?: unknown }
+        if (value.url) {
+          const response = await fetch(value.url)
+          if (!response.ok) throw new Error(`failed to download import url: ${response.status}`)
+          const bytes = new Uint8Array(await response.arrayBuffer())
+          const parsed = SessionTransfer.parse(bytes)
+          return c.json(await SessionTransfer.importAll(parsed))
+        }
+
+        if (value.data) {
+          const parsed = SessionTransfer.parse(JSON.stringify(value.data))
+          return c.json(await SessionTransfer.importAll(parsed))
+        }
+
+        throw new Error("import requires url or data")
       },
     )
     .get(

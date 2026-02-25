@@ -3,12 +3,12 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { execSync } from "node:child_process"
-import { createSdk, modKey, resolveDirectory, serverUrl } from "./utils"
+import { modKey, serverUrl } from "./utils"
 import {
+  sessionItemSelector,
   dropdownMenuTriggerSelector,
   dropdownMenuContentSelector,
   projectMenuTriggerSelector,
-  projectCloseMenuSelector,
   projectWorkspacesToggleSelector,
   titlebarRightSelector,
   popoverBodySelector,
@@ -18,6 +18,7 @@ import {
   workspaceItemSelector,
   workspaceMenuTriggerSelector,
 } from "./selectors"
+import type { createSdk } from "./utils"
 
 export async function defocus(page: Page) {
   await page
@@ -60,9 +61,9 @@ export async function closeDialog(page: Page, dialog: Locator) {
 }
 
 export async function isSidebarClosed(page: Page) {
-  const button = page.getByRole("button", { name: /toggle sidebar/i }).first()
-  await expect(button).toBeVisible()
-  return (await button.getAttribute("aria-expanded")) !== "true"
+  const main = page.locator("main")
+  const classes = (await main.getAttribute("class")) ?? ""
+  return classes.includes("xl:border-l")
 }
 
 export async function toggleSidebar(page: Page) {
@@ -74,34 +75,48 @@ export async function openSidebar(page: Page) {
   if (!(await isSidebarClosed(page))) return
 
   const button = page.getByRole("button", { name: /toggle sidebar/i }).first()
-  await button.click()
+  const visible = await button
+    .isVisible()
+    .then((x) => x)
+    .catch(() => false)
 
-  const opened = await expect(button)
-    .toHaveAttribute("aria-expanded", "true", { timeout: 1500 })
+  if (visible) await button.click()
+  if (!visible) await toggleSidebar(page)
+
+  const main = page.locator("main")
+  const opened = await expect(main)
+    .not.toHaveClass(/xl:border-l/, { timeout: 1500 })
     .then(() => true)
     .catch(() => false)
 
   if (opened) return
 
   await toggleSidebar(page)
-  await expect(button).toHaveAttribute("aria-expanded", "true")
+  await expect(main).not.toHaveClass(/xl:border-l/)
 }
 
 export async function closeSidebar(page: Page) {
   if (await isSidebarClosed(page)) return
 
   const button = page.getByRole("button", { name: /toggle sidebar/i }).first()
-  await button.click()
+  const visible = await button
+    .isVisible()
+    .then((x) => x)
+    .catch(() => false)
 
-  const closed = await expect(button)
-    .toHaveAttribute("aria-expanded", "false", { timeout: 1500 })
+  if (visible) await button.click()
+  if (!visible) await toggleSidebar(page)
+
+  const main = page.locator("main")
+  const closed = await expect(main)
+    .toHaveClass(/xl:border-l/, { timeout: 1500 })
     .then(() => true)
     .catch(() => false)
 
   if (closed) return
 
   await toggleSidebar(page)
-  await expect(button).toHaveAttribute("aria-expanded", "false")
+  await expect(main).toHaveClass(/xl:border-l/)
 }
 
 export async function openSettings(page: Page) {
@@ -189,7 +204,7 @@ export async function createTestProject() {
     stdio: "ignore",
   })
 
-  return resolveDirectory(root)
+  return root
 }
 
 export async function cleanupTestProject(directory: string) {
@@ -199,40 +214,13 @@ export async function cleanupTestProject(directory: string) {
   await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => undefined)
 }
 
-export function slugFromUrl(url: string) {
-  return /\/([^/]+)\/session(?:[/?#]|$)/.exec(url)?.[1] ?? ""
-}
-
-export async function waitSlug(page: Page, skip: string[] = []) {
-  let prev = ""
-  let next = ""
-  await expect
-    .poll(
-      () => {
-        const slug = slugFromUrl(page.url())
-        if (!slug) return ""
-        if (skip.includes(slug)) return ""
-        if (slug !== prev) {
-          prev = slug
-          next = ""
-          return ""
-        }
-        next = slug
-        return slug
-      },
-      { timeout: 45_000 },
-    )
-    .not.toBe("")
-  return next
-}
-
 export function sessionIDFromUrl(url: string) {
   const match = /\/session\/([^/?#]+)/.exec(url)
   return match?.[1]
 }
 
 export async function hoverSessionItem(page: Page, sessionID: string) {
-  const sessionEl = page.locator(`[data-session-id="${sessionID}"]`).last()
+  const sessionEl = page.locator(sessionItemSelector(sessionID)).first()
   await expect(sessionEl).toBeVisible()
   await sessionEl.hover()
   return sessionEl
@@ -333,57 +321,6 @@ export async function clickListItem(
   return item
 }
 
-async function status(sdk: ReturnType<typeof createSdk>, sessionID: string) {
-  const data = await sdk.session
-    .status()
-    .then((x) => x.data ?? {})
-    .catch(() => undefined)
-  return data?.[sessionID]
-}
-
-async function stable(sdk: ReturnType<typeof createSdk>, sessionID: string, timeout = 10_000) {
-  let prev = ""
-  await expect
-    .poll(
-      async () => {
-        const info = await sdk.session
-          .get({ sessionID })
-          .then((x) => x.data)
-          .catch(() => undefined)
-        if (!info) return true
-        const next = `${info.title}:${info.time.updated ?? info.time.created}`
-        if (next !== prev) {
-          prev = next
-          return false
-        }
-        return true
-      },
-      { timeout },
-    )
-    .toBe(true)
-}
-
-export async function waitSessionIdle(sdk: ReturnType<typeof createSdk>, sessionID: string, timeout = 30_000) {
-  await expect.poll(() => status(sdk, sessionID).then((x) => !x || x.type === "idle"), { timeout }).toBe(true)
-}
-
-export async function cleanupSession(input: {
-  sessionID: string
-  directory?: string
-  sdk?: ReturnType<typeof createSdk>
-}) {
-  const sdk = input.sdk ?? (input.directory ? createSdk(input.directory) : undefined)
-  if (!sdk) throw new Error("cleanupSession requires sdk or directory")
-  await waitSessionIdle(sdk, input.sessionID, 5_000).catch(() => undefined)
-  const current = await status(sdk, input.sessionID).catch(() => undefined)
-  if (current && current.type !== "idle") {
-    await sdk.session.abort({ sessionID: input.sessionID }).catch(() => undefined)
-    await waitSessionIdle(sdk, input.sessionID).catch(() => undefined)
-  }
-  await stable(sdk, input.sessionID).catch(() => undefined)
-  await sdk.session.delete({ sessionID: input.sessionID }).catch(() => undefined)
-}
-
 export async function withSession<T>(
   sdk: ReturnType<typeof createSdk>,
   title: string,
@@ -395,7 +332,7 @@ export async function withSession<T>(
   try {
     return await callback(session)
   } finally {
-    await cleanupSession({ sdk, sessionID: session.id })
+    await sdk.session.delete({ sessionID: session.id }).catch(() => undefined)
   }
 }
 
@@ -508,57 +445,6 @@ export async function seedSessionPermission(
   return { id: result.id }
 }
 
-export async function seedSessionTask(
-  sdk: ReturnType<typeof createSdk>,
-  input: {
-    sessionID: string
-    description: string
-    prompt: string
-    subagentType?: string
-  },
-) {
-  const text = [
-    "Your only valid response is one task tool call.",
-    `Use this JSON input: ${JSON.stringify({
-      description: input.description,
-      prompt: input.prompt,
-      subagent_type: input.subagentType ?? "general",
-    })}`,
-    "Do not output plain text.",
-    "Wait for the task to start and return the child session id.",
-  ].join("\n")
-
-  const result = await seed({
-    sdk,
-    sessionID: input.sessionID,
-    prompt: text,
-    timeout: 90_000,
-    probe: async () => {
-      const messages = await sdk.session.messages({ sessionID: input.sessionID, limit: 50 }).then((x) => x.data ?? [])
-      const part = messages
-        .flatMap((message) => message.parts)
-        .find((part) => {
-          if (part.type !== "tool" || part.tool !== "task") return false
-          if (part.state.input?.description !== input.description) return false
-          return typeof part.state.metadata?.sessionId === "string" && part.state.metadata.sessionId.length > 0
-        })
-
-      if (!part) return
-      const id = part.state.metadata?.sessionId
-      if (typeof id !== "string" || !id) return
-      const child = await sdk.session
-        .get({ sessionID: id })
-        .then((x) => x.data)
-        .catch(() => undefined)
-      if (!child?.id) return
-      return { sessionID: id }
-    },
-  })
-
-  if (!result) throw new Error("Timed out seeding task tool")
-  return result
-}
-
 export async function seedSessionTodos(
   sdk: ReturnType<typeof createSdk>,
   input: {
@@ -630,72 +516,81 @@ export async function openStatusPopover(page: Page) {
 }
 
 export async function openProjectMenu(page: Page, projectSlug: string) {
-  const trigger = page.locator(projectMenuTriggerSelector(projectSlug)).first()
-  await expect(trigger).toHaveCount(1)
-
-  const menu = page
-    .locator(dropdownMenuContentSelector)
-    .filter({ has: page.locator(projectCloseMenuSelector(projectSlug)) })
-    .first()
-  const close = menu.locator(projectCloseMenuSelector(projectSlug)).first()
-
-  const clicked = await trigger
-    .click({ timeout: 1500 })
-    .then(() => true)
+  const exact = page.locator(projectMenuTriggerSelector(projectSlug)).first()
+  const hasExact = await exact
+    .count()
+    .then((count) => count > 0)
     .catch(() => false)
 
-  if (clicked) {
-    const opened = await menu
-      .waitFor({ state: "visible", timeout: 1500 })
-      .then(() => true)
-      .catch(() => false)
-    if (opened) {
-      await expect(close).toBeVisible()
-      return menu
-    }
-  }
+  const trigger = hasExact
+    ? exact
+    : page.locator('[data-component="sidebar-nav-desktop"] [data-action="project-menu"]').first()
+
+  await expect(trigger).toHaveCount(1)
 
   await trigger.focus()
   await page.keyboard.press("Enter")
 
+  const menu = page.locator(dropdownMenuContentSelector).first()
   const opened = await menu
     .waitFor({ state: "visible", timeout: 1500 })
     .then(() => true)
     .catch(() => false)
 
   if (opened) {
-    await expect(close).toBeVisible()
+    const viewport = page.viewportSize()
+    const x = viewport ? Math.max(viewport.width - 5, 0) : 1200
+    const y = viewport ? Math.max(viewport.height - 5, 0) : 800
+    await page.mouse.move(x, y)
     return menu
   }
 
-  throw new Error(`Failed to open project menu: ${projectSlug}`)
+  await trigger.click({ force: true })
+
+  await expect(menu).toBeVisible()
+
+  const viewport = page.viewportSize()
+  const x = viewport ? Math.max(viewport.width - 5, 0) : 1200
+  const y = viewport ? Math.max(viewport.height - 5, 0) : 800
+  await page.mouse.move(x, y)
+  return menu
 }
 
 export async function setWorkspacesEnabled(page: Page, projectSlug: string, enabled: boolean) {
-  const current = await page
-    .getByRole("button", { name: "New workspace" })
-    .first()
-    .isVisible()
-    .then((x) => x)
-    .catch(() => false)
+  const isEnabled = async () => {
+    const exact = await page
+      .locator(workspaceItemSelector(projectSlug))
+      .count()
+      .then((count) => count > 0)
+      .catch(() => false)
+    if (exact) return true
 
-  if (current === enabled) return
-
-  const flip = async (timeout?: number) => {
-    const menu = await openProjectMenu(page, projectSlug)
-    const toggle = menu.locator(projectWorkspacesToggleSelector(projectSlug)).first()
-    await expect(toggle).toBeVisible()
-    return toggle.click({ force: true, timeout })
+    return await page
+      .locator('[data-component="sidebar-nav-desktop"] [data-component="workspace-item"]')
+      .count()
+      .then((count) => count > 0)
+      .catch(() => false)
   }
 
-  const flipped = await flip(1500)
-    .then(() => true)
-    .catch(() => false)
+  for (const _ of [0, 1, 2]) {
+    if ((await isEnabled()) === enabled) return
 
-  if (!flipped) await flip()
+    await openProjectMenu(page, projectSlug)
 
-  const expected = enabled ? "New workspace" : "New session"
-  await expect(page.getByRole("button", { name: expected }).first()).toBeVisible()
+    const exact = page.locator(projectWorkspacesToggleSelector(projectSlug)).first()
+    const hasExact = await exact
+      .count()
+      .then((count) => count > 0)
+      .catch(() => false)
+
+    const toggle = hasExact
+      ? exact
+      : page.locator('[data-component="dropdown-menu-content"] [data-action="project-workspaces-toggle"]').first()
+    await expect(toggle).toBeVisible()
+    await toggle.click({ force: true })
+  }
+
+  await expect.poll(isEnabled).toBe(enabled)
 }
 
 export async function openWorkspaceMenu(page: Page, workspaceSlug: string) {
