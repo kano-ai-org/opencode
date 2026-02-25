@@ -11,6 +11,9 @@ import { lazy } from "../../util/lazy"
 import { Config } from "../../config/config"
 import { errors } from "../error"
 
+import { InstanceID } from "@/global/identity"
+import { Global } from "@/global"
+
 const log = Log.create({ service: "server" })
 
 export const GlobalDisposedEvent = BusEvent.define("global.disposed", z.object({}))
@@ -36,6 +39,39 @@ export const GlobalRoutes = lazy(() =>
       }),
       async (c) => {
         return c.json({ healthy: true, version: Installation.VERSION })
+      },
+    )
+    .get(
+      "/identity",
+      describeRoute({
+        summary: "Get server identity",
+        description: "Get a persistent instance identity for this server and its storage paths.",
+        operationId: "global.identity",
+        responses: {
+          200: {
+            description: "Server identity",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    instanceID: z.string(),
+                    state: z.string(),
+                    data: z.string(),
+                    config: z.string(),
+                  }),
+                ),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        return c.json({
+          instanceID: await InstanceID.get(),
+          state: Global.Path.state,
+          data: Global.Path.data,
+          config: Global.Path.config,
+        })
       },
     )
     .get(

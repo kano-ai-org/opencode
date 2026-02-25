@@ -1,7 +1,7 @@
 import z from "zod"
 import { Filesystem } from "../util/filesystem"
 import path from "path"
-import { Database, eq } from "../storage/db"
+import { Database, eq, and, NotFoundError } from "../storage/db"
 import { ProjectTable } from "./project.sql"
 import { SessionTable } from "../session/session.sql"
 import { Log } from "../util/log"
@@ -12,24 +12,12 @@ import { BusEvent } from "@/bus/bus-event"
 import { iife } from "@/util/iife"
 import { GlobalBus } from "@/bus/global"
 import { existsSync } from "fs"
+
+import { realpath } from "fs/promises"
 import { git } from "../util/git"
-import { Glob } from "../util/glob"
 
 export namespace Project {
   const log = Log.create({ service: "project" })
-
-  function gitpath(cwd: string, name: string) {
-    if (!name) return cwd
-    // git output includes trailing newlines; keep path whitespace intact.
-    name = name.replace(/[\r\n]+$/, "")
-    if (!name) return cwd
-
-    name = Filesystem.windowsPath(name)
-
-    if (path.isAbsolute(name)) return path.normalize(name)
-    return path.resolve(cwd, name)
-  }
-
   export const Info = z
     .object({
       id: z.string(),
@@ -64,12 +52,87 @@ export namespace Project {
     Updated: BusEvent.define("project.updated", Info),
   }
 
+  export const WorkspaceToggles = z
+    .object({
+      version: z.number().int().nonnegative(),
+      toggles: z.record(z.string(), z.boolean()),
+    })
+    .meta({
+      ref: "ProjectWorkspaceToggles",
+    })
+
+  export const WorkspaceTogglesInput = z.object({
+    projectID: z.string(),
+    version: z.number().int().nonnegative(),
+    toggles: z.record(z.string(), z.boolean()),
+  })
+
   type Row = typeof ProjectTable.$inferSelect
+
+  const pathkey = (directory: string) => {
+    const normalized = directory.replace(/\\/g, "/").replace(/\/+$/, "")
+    if (!/^[A-Za-z]:\//.test(normalized)) return normalized
+    return `${normalized.slice(0, 1).toUpperCase()}${normalized.slice(1).toLowerCase()}`
+  }
+
+  const canonical = (directory: string) =>
+    realpath(directory)
+      .then(pathkey)
+      .catch(() => pathkey(directory))
+
+  const sanitizeWorkspaceToggles = (row: Row, toggles: Record<string, boolean>) => {
+    const allowed = new Set([row.worktree, ...row.sandboxes])
+    return Object.fromEntries(Object.entries(toggles).filter(([directory]) => allowed.has(directory)))
+  }
+
+  const sanitizeWorkspaceTogglesInput = async (row: Row, toggles: Record<string, boolean>) => {
+    const allowed = [row.worktree, ...row.sandboxes]
+    const aliases = await Promise.all(allowed.map((directory) => canonical(directory).then((key) => [key, directory] as const)))
+    const map = new Map(aliases)
+    const direct = new Map(allowed.map((directory) => [pathkey(directory), directory] as const))
+    const tail = allowed.reduce<Map<string, string | undefined>>((acc, directory) => {
+      const name = path.basename(directory.replace(/\\/g, "/")).toLowerCase()
+      if (!name) return acc
+      if (!acc.has(name)) {
+        acc.set(name, directory)
+        return acc
+      }
+      acc.set(name, undefined)
+      return acc
+    }, new Map())
+
+    const resolved = await Promise.all(
+      Object.entries(toggles).map(async ([directory, enabled]) => {
+        const key = await canonical(directory)
+        const byCanonical = map.get(key)
+        if (byCanonical) return [byCanonical, enabled] as const
+
+        const byDirect = direct.get(pathkey(directory))
+        if (byDirect) return [byDirect, enabled] as const
+
+        const name = path.basename(directory.replace(/\\/g, "/")).toLowerCase()
+        const byTail = tail.get(name)
+        const target = byTail && allowed.includes(byTail) ? byTail : undefined
+        if (!target) return
+        return [target, enabled] as const
+      }),
+    )
+
+    return Object.fromEntries(resolved.filter((item): item is readonly [string, boolean] => !!item))
+  }
+
+  const workspaceTogglesFromRow = (row: Row) => {
+    const toggles = sanitizeWorkspaceToggles(row, row.workspace_toggles ?? {})
+    return {
+      version: row.workspace_toggles_version,
+      toggles,
+    }
+  }
 
   export function fromRow(row: Row): Info {
     const icon =
-      row.icon_url || row.icon_color
-        ? { url: row.icon_url ?? undefined, color: row.icon_color ?? undefined }
+      row.icon_url || row.icon_override || row.icon_color
+        ? { url: row.icon_url ?? undefined, override: row.icon_override ?? undefined, color: row.icon_color ?? undefined }
         : undefined
     return {
       id: row.id,
@@ -100,7 +163,8 @@ export namespace Project {
         const gitBinary = Bun.which("git")
 
         // cached id calculation
-        let id = await Filesystem.readText(path.join(dotgit, "opencode"))
+        let id = await Bun.file(path.join(dotgit, "opencode"))
+          .text()
           .then((x) => x.trim())
           .catch(() => undefined)
 
@@ -138,7 +202,9 @@ export namespace Project {
 
           id = roots[0]
           if (id) {
-            await Filesystem.write(path.join(dotgit, "opencode"), id).catch(() => undefined)
+            void Bun.file(path.join(dotgit, "opencode"))
+              .write(id)
+              .catch(() => undefined)
           }
         }
 
@@ -154,7 +220,7 @@ export namespace Project {
         const top = await git(["rev-parse", "--show-toplevel"], {
           cwd: sandbox,
         })
-          .then(async (result) => gitpath(sandbox, await result.text()))
+          .then(async (result) => path.resolve(sandbox, (await result.text()).trim()))
           .catch(() => undefined)
 
         if (!top) {
@@ -172,9 +238,9 @@ export namespace Project {
           cwd: sandbox,
         })
           .then(async (result) => {
-            const common = gitpath(sandbox, await result.text())
-            // Avoid going to parent of sandbox when git-common-dir is empty.
-            return common === sandbox ? sandbox : path.dirname(common)
+            const dirname = path.dirname((await result.text()).trim())
+            if (dirname === ".") return sandbox
+            return dirname
           })
           .catch(() => undefined)
 
@@ -242,11 +308,14 @@ export namespace Project {
       vcs: result.vcs ?? null,
       name: result.name,
       icon_url: result.icon?.url,
+      icon_override: result.icon?.override,
       icon_color: result.icon?.color,
       time_created: result.time.created,
       time_updated: result.time.updated,
       time_initialized: result.time.initialized,
       sandboxes: result.sandboxes,
+      workspace_toggles: row?.workspace_toggles ?? {},
+      workspace_toggles_version: row?.workspace_toggles_version ?? 0,
       commands: result.commands,
     }
     const updateSet = {
@@ -254,10 +323,13 @@ export namespace Project {
       vcs: result.vcs ?? null,
       name: result.name,
       icon_url: result.icon?.url,
+      icon_override: result.icon?.override,
       icon_color: result.icon?.color,
       time_updated: result.time.updated,
       time_initialized: result.time.initialized,
       sandboxes: result.sandboxes,
+      workspace_toggles: row?.workspace_toggles ?? {},
+      workspace_toggles_version: row?.workspace_toggles_version ?? 0,
       commands: result.commands,
     }
     Database.use((db) =>
@@ -276,16 +348,22 @@ export namespace Project {
     if (input.vcs !== "git") return
     if (input.icon?.override) return
     if (input.icon?.url) return
-    const matches = await Glob.scan("**/favicon.{ico,png,svg,jpg,jpeg,webp}", {
-      cwd: input.worktree,
-      absolute: true,
-      include: "file",
-    })
+    const glob = new Bun.Glob("**/{favicon}.{ico,png,svg,jpg,jpeg,webp}")
+    const matches = await Array.fromAsync(
+      glob.scan({
+        cwd: input.worktree,
+        absolute: true,
+        onlyFiles: true,
+        followSymlinks: false,
+        dot: false,
+      }),
+    )
     const shortest = matches.sort((a, b) => a.length - b.length)[0]
     if (!shortest) return
-    const buffer = await Filesystem.readBytes(shortest)
-    const base64 = buffer.toString("base64")
-    const mime = Filesystem.mimeType(shortest) || "image/png"
+    const file = Bun.file(shortest)
+    const buffer = await file.arrayBuffer()
+    const base64 = Buffer.from(buffer).toString("base64")
+    const mime = file.type || "image/png"
     const url = `data:${mime};base64,${base64}`
     await update({
       projectID: input.id,
@@ -360,6 +438,7 @@ export namespace Project {
           .set({
             name: input.name,
             icon_url: input.icon?.url,
+            icon_override: input.icon?.override,
             icon_color: input.icon?.color,
             commands: input.commands,
             time_updated: Date.now(),
@@ -380,14 +459,78 @@ export namespace Project {
     },
   )
 
+  export const remove = fn(z.object({ projectID: z.string() }), async ({ projectID }) => {
+    if (projectID === "global") {
+      throw new Error("cannot delete global project")
+    }
+
+    const removed = Database.use((db) => db.delete(ProjectTable).where(eq(ProjectTable.id, projectID)).returning().get())
+    if (!removed) throw new NotFoundError({ message: `Project not found: ${projectID}` })
+
+    return true
+  })
+
+  export function getWorkspaceToggles(projectID: string) {
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, projectID)).get())
+    if (!row) {
+      throw new NotFoundError({ message: `Project not found: ${projectID}` })
+    }
+    return WorkspaceToggles.parse(workspaceTogglesFromRow(row))
+  }
+
+  export const updateWorkspaceToggles = fn(WorkspaceTogglesInput, async (input) => {
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, input.projectID)).get())
+    if (!row) {
+      throw new NotFoundError({ message: `Project not found: ${input.projectID}` })
+    }
+
+    const current = workspaceTogglesFromRow(row)
+    if (input.version !== current.version) {
+      return {
+        status: 409 as const,
+        data: WorkspaceToggles.parse(current),
+      }
+    }
+
+    const toggles = await sanitizeWorkspaceTogglesInput(row, input.toggles)
+    const nextVersion = current.version + 1
+    const updated = Database.use((db) =>
+      db
+        .update(ProjectTable)
+        .set({
+          workspace_toggles: toggles,
+          workspace_toggles_version: nextVersion,
+          time_updated: Date.now(),
+        })
+        .where(and(eq(ProjectTable.id, input.projectID), eq(ProjectTable.workspace_toggles_version, input.version)))
+        .returning()
+        .get(),
+    )
+
+    if (!updated) {
+      const latest = getWorkspaceToggles(input.projectID)
+      return {
+        status: 409 as const,
+        data: latest,
+      }
+    }
+
+    return {
+      status: 200 as const,
+      data: WorkspaceToggles.parse(workspaceTogglesFromRow(updated)),
+    }
+  })
+
   export async function sandboxes(id: string) {
     const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
     if (!row) return []
     const data = fromRow(row)
     const valid: string[] = []
     for (const dir of data.sandboxes) {
-      const s = Filesystem.stat(dir)
-      if (s?.isDirectory()) valid.push(dir)
+      const stat = await Bun.file(dir)
+        .stat()
+        .catch(() => undefined)
+      if (stat?.isDirectory()) valid.push(dir)
     }
     return valid
   }

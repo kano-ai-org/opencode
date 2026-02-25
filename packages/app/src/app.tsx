@@ -24,13 +24,12 @@ import { NotificationProvider } from "@/context/notification"
 import { PermissionProvider } from "@/context/permission"
 import { usePlatform } from "@/context/platform"
 import { PromptProvider } from "@/context/prompt"
-import { type ServerConnection, ServerProvider, useServer } from "@/context/server"
+import { type ServerConnection, ServerProvider, useServer, normalizeServerUrl } from "@/context/server"
 import { SettingsProvider } from "@/context/settings"
 import { TerminalProvider } from "@/context/terminal"
 import DirectoryLayout from "@/pages/directory-layout"
 import Layout from "@/pages/layout"
 import { ErrorPage } from "./pages/error"
-
 const Home = lazy(() => import("@/pages/home"))
 const Session = lazy(() => import("@/pages/session"))
 const Loading = () => <div class="size-full" />
@@ -112,6 +111,30 @@ function RouterRoot(props: ParentProps<{ appChildren?: JSX.Element }>) {
   )
 }
 
+const getStoredDefaultServerUrl = (platform: ReturnType<typeof usePlatform>) => {
+  if (platform.platform !== "web") return
+  const result = platform.getDefaultServerUrl?.()
+  if (result instanceof Promise) return
+  if (!result) return
+  return normalizeServerUrl(result)
+}
+
+const resolveDefaultServerUrl = (props: {
+  defaultUrl?: string
+  storedDefaultServerUrl?: string
+  hostname: string
+  origin: string
+  isDev: boolean
+  devHost?: string
+  devPort?: string
+}) => {
+  if (props.defaultUrl) return props.defaultUrl
+  if (props.storedDefaultServerUrl) return props.storedDefaultServerUrl
+  if (props.hostname.includes("opencode.ai")) return "http://localhost:4096"
+  if (props.isDev) return `http://${props.devHost ?? props.hostname ?? "localhost"}:${props.devPort ?? "4096"}`
+  return props.origin
+}
+
 export function AppBaseProviders(props: ParentProps) {
   return (
     <MetaProvider>
@@ -138,19 +161,38 @@ export function AppBaseProviders(props: ParentProps) {
 function ServerKey(props: ParentProps) {
   const server = useServer()
   return (
-    <Show when={server.key} keyed>
+    <Show when={server.url} keyed>
       {props.children}
     </Show>
   )
 }
 
 export function AppInterface(props: {
-  children?: JSX.Element
-  defaultServer: ServerConnection.Key
+  defaultUrl?: string
+  defaultServer?: ServerConnection.Key
   servers?: Array<ServerConnection.Any>
+  children?: JSX.Element
+  isSidecar?: boolean
 }) {
+  const platform = usePlatform()
+  const storedDefaultServerUrl = getStoredDefaultServerUrl(platform)
+  const defaultServerUrl = resolveDefaultServerUrl({
+    defaultUrl: props.defaultUrl,
+    storedDefaultServerUrl,
+    hostname: location.hostname,
+    origin: window.location.origin,
+    isDev: import.meta.env.DEV,
+    devHost: import.meta.env.VITE_OPENCODE_SERVER_HOST || undefined,
+    devPort: import.meta.env.VITE_OPENCODE_SERVER_PORT || undefined,
+  })
+
   return (
-    <ServerProvider defaultServer={props.defaultServer} servers={props.servers}>
+    <ServerProvider
+      defaultUrl={defaultServerUrl}
+      defaultServer={props.defaultServer}
+      servers={props.servers}
+      isSidecar={props.isSidecar}
+    >
       <ServerKey>
         <GlobalSDKProvider>
           <GlobalSyncProvider>

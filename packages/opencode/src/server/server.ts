@@ -50,6 +50,15 @@ export namespace Server {
   let _url: URL | undefined
   let _corsWhitelist: string[] = []
 
+  function allow(origin: string) {
+    return _corsWhitelist.some((item) => {
+      if (item === origin) return true
+      if (!item.includes("*")) return false
+      const safe = item.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")
+      return new RegExp(`^${safe}$`, "i").test(origin)
+    })
+  }
+
   export function url(): URL {
     return _url ?? new URL("http://localhost:4096")
   }
@@ -121,7 +130,7 @@ export namespace Server {
               if (/^https:\/\/([a-z0-9-]+\.)*opencode\.ai$/.test(input)) {
                 return input
               }
-              if (_corsWhitelist.includes(input)) {
+              if (allow(input)) {
                 return input
               }
 
@@ -542,12 +551,13 @@ export namespace Server {
         )
         .all("/*", async (c) => {
           const path = c.req.path
+          const ui = (Flag.OPENCODE_WEB_UI_ORIGIN || "https://app.opencode.ai").replace(/\/+$/, "")
 
-          const response = await proxy(`https://app.opencode.ai${path}`, {
+          const response = await proxy(`${ui}${path}`, {
             ...c.req,
             headers: {
               ...c.req.raw.headers,
-              host: "app.opencode.ai",
+              host: new URL(ui).host,
             },
           })
           response.headers.set(

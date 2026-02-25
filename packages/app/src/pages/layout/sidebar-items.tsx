@@ -12,9 +12,12 @@ import { IconButton } from "@opencode-ai/ui/icon-button"
 import { MessageNav } from "@opencode-ai/ui/message-nav"
 import { Spinner } from "@opencode-ai/ui/spinner"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
+import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { getFilename } from "@opencode-ai/util/path"
 import { type Message, type Session, type TextPart, type UserMessage } from "@opencode-ai/sdk/v2/client"
 import { For, Match, Show, Switch, createMemo, onCleanup, type Accessor, type JSX } from "solid-js"
+
+import { createStore } from "solid-js/store"
 import { agentColor } from "@/utils/agent"
 
 const OPENCODE_PROJECT_ID = "4b0ea68d7af9a6031a7ffda7ad66e0cb83315750"
@@ -68,6 +71,19 @@ export type SessionItemProps = {
   clearHoverProjectSoon: () => void
   prefetchSession: (session: Session, priority?: "high" | "low") => void
   archiveSession: (session: Session) => Promise<void>
+  renameSession: (session: Session, next: string) => Promise<void>
+  editorOpen: (id: string) => boolean
+  openEditor: (id: string, value: string) => void
+  InlineEditor: (props: {
+    id: string
+    value: Accessor<string>
+    onSave: (next: string) => void
+    class?: string
+    displayClass?: string
+    editing?: boolean
+    stopPropagation?: boolean
+    openOnDblClick?: boolean
+  }) => JSX.Element
 }
 
 const SessionRow = (props: {
@@ -86,6 +102,9 @@ const SessionRow = (props: {
   prefetchSession: (session: Session, priority?: "high" | "low") => void
   scheduleHoverPrefetch: () => void
   cancelHoverPrefetch: () => void
+  InlineEditor: SessionItemProps["InlineEditor"]
+  editorOpen: SessionItemProps["editorOpen"]
+  onRename: (next: string) => void
 }): JSX.Element => (
   <A
     href={`/${props.slug}/session/${props.session.id}`}
@@ -121,9 +140,14 @@ const SessionRow = (props: {
           </Match>
         </Switch>
       </div>
-      <span class="text-14-regular text-text-strong grow-1 min-w-0 overflow-hidden text-ellipsis truncate">
-        {props.session.title}
-      </span>
+      <props.InlineEditor
+        id={`session:${props.session.id}`}
+        value={() => props.session.title}
+        onSave={props.onRename}
+        class="text-14-regular text-text-strong grow-1 min-w-0 overflow-hidden text-ellipsis truncate"
+        displayClass="text-14-regular text-text-strong grow-1 min-w-0 overflow-hidden text-ellipsis truncate"
+        editing={props.editorOpen(`session:${props.session.id}`)}
+      />
       <Show when={props.session.summary}>
         {(summary) => (
           <div class="group-hover/session:hidden group-active/session:hidden group-focus-within/session:hidden">
@@ -229,6 +253,10 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
   const hoverAllowed = createMemo(() => !props.mobile && props.sidebarExpanded())
   const hoverEnabled = createMemo(() => (props.popover ?? true) && hoverAllowed())
   const isActive = createMemo(() => props.session.id === params.id)
+  const [menu, setMenu] = createStore({
+    open: false,
+    pendingRename: false,
+  })
 
   const hoverPrefetch = { current: undefined as ReturnType<typeof setTimeout> | undefined }
   const cancelHoverPrefetch = () => {
@@ -268,6 +296,9 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
       prefetchSession={props.prefetchSession}
       scheduleHoverPrefetch={scheduleHoverPrefetch}
       cancelHoverPrefetch={cancelHoverPrefetch}
+      InlineEditor={props.InlineEditor}
+      editorOpen={props.editorOpen}
+      onRename={(next) => void props.renameSession(props.session, next)}
     />
   )
 
@@ -313,25 +344,57 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
       <div
         class={`absolute ${props.dense ? "top-0.5 right-0.5" : "top-1 right-1"} flex items-center gap-0.5 transition-opacity`}
         classList={{
-          "opacity-100 pointer-events-auto": !!props.mobile,
-          "opacity-0 pointer-events-none": !props.mobile,
+          "opacity-100 pointer-events-auto": !!props.mobile || menu.open,
+          "opacity-0 pointer-events-none": !props.mobile && !menu.open,
           "group-hover/session:opacity-100 group-hover/session:pointer-events-auto": true,
           "group-focus-within/session:opacity-100 group-focus-within/session:pointer-events-auto": true,
         }}
       >
-        <Tooltip value={language.t("common.archive")} placement="top">
-          <IconButton
-            icon="archive"
-            variant="ghost"
-            class="size-6 rounded-md"
-            aria-label={language.t("common.archive")}
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              void props.archiveSession(props.session)
-            }}
-          />
-        </Tooltip>
+        <DropdownMenu
+          modal={!props.sidebarHovering()}
+          open={menu.open}
+          onOpenChange={(open) => setMenu("open", open)}
+        >
+          <Tooltip value={language.t("common.moreOptions")} placement="top">
+            <DropdownMenu.Trigger
+              as={IconButton}
+              icon="dot-grid"
+              variant="ghost"
+              class="size-6 rounded-md data-[expanded]:bg-surface-base-active"
+              data-action="session-menu"
+              data-session-id={props.session.id}
+              aria-label={language.t("common.moreOptions")}
+            />
+          </Tooltip>
+          <DropdownMenu.Portal mount={!props.mobile ? props.nav() : undefined}>
+            <DropdownMenu.Content
+              onCloseAutoFocus={(event) => {
+                if (!menu.pendingRename) return
+                event.preventDefault()
+                setMenu("pendingRename", false)
+                props.openEditor(`session:${props.session.id}`, props.session.title)
+              }}
+            >
+              <DropdownMenu.Item
+                data-action="session-rename"
+                data-session-id={props.session.id}
+                onSelect={() => {
+                  setMenu("pendingRename", true)
+                  setMenu("open", false)
+                }}
+              >
+                <DropdownMenu.ItemLabel>{language.t("common.rename")}</DropdownMenu.ItemLabel>
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                data-action="session-archive"
+                data-session-id={props.session.id}
+                onSelect={() => void props.archiveSession(props.session)}
+              >
+                <DropdownMenu.ItemLabel>{language.t("common.archive")}</DropdownMenu.ItemLabel>
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu>
       </div>
     </div>
   )
