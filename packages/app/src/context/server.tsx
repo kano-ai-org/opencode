@@ -7,6 +7,7 @@ import { checkServerHealth } from "@/utils/server-health"
 
 type StoredProject = { worktree: string; expanded: boolean }
 const HEALTH_POLL_INTERVAL_MS = 10_000
+type Identity = { instanceID: string }
 
 export function normalizeServerUrl(input: string) {
   const trimmed = input.trim()
@@ -30,7 +31,7 @@ function projectsKey(key: ServerConnection.Key) {
 
 function isLocalHost(url: string) {
   const host = url.replace(/^https?:\/\//, "").split(":")[0]
-  if (host === "localhost" || host === "127.0.0.1") return "local"
+  return host === "localhost" || host === "127.0.0.1" || host === "::1"
 }
 
 export namespace ServerConnection {
@@ -42,7 +43,6 @@ export namespace ServerConnection {
     password?: string
   }
 
-  // Regular web connections
   export type Http = {
     type: "http"
     http: HttpBase
@@ -94,13 +94,35 @@ export namespace ServerConnection {
 
 export const { use: useServer, provider: ServerProvider } = createSimpleContext({
   name: "Server",
-  init: (props: { defaultServer: ServerConnection.Key; servers?: Array<ServerConnection.Any> }) => {
+  init: (props: {
+    defaultServer?: ServerConnection.Key
+    servers?: Array<ServerConnection.Any>
+    defaultUrl?: string
+    isSidecar?: boolean
+  }) => {
     const platform = usePlatform()
+    const defaultUrl = normalizeServerUrl(props.defaultUrl ?? "") ?? ""
+    const compatServer = defaultUrl
+      ? ({
+          type: "http",
+          http: { url: defaultUrl },
+        } satisfies ServerConnection.Http)
+      : undefined
+    const configuredServers = compatServer ? [compatServer, ...(props.servers ?? [])] : (props.servers ?? [])
+    const resolvedDefaultServer =
+      props.defaultServer ??
+      (compatServer
+        ? ServerConnection.key(compatServer)
+        : configuredServers[0]
+          ? ServerConnection.key(configuredServers[0])
+          : ServerConnection.Key.make(""))
 
     const [store, setStore, _, ready] = persisted(
       Persist.global("server", ["server.v3"]),
       createStore({
         list: [] as string[],
+        identity: {} as Record<string, string>,
+        identityError: {} as Record<string, string>,
         projects: {} as Record<string, StoredProject[]>,
         lastProject: {} as Record<string, string>,
       }),
@@ -108,7 +130,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
 
     const allServers = createMemo((): Array<ServerConnection.Any> => {
       const servers = [
-        ...(props.servers ?? []),
+        ...configuredServers,
         ...store.list.map((value) => ({
           type: "http" as const,
           http: typeof value === "string" ? { url: value } : value,
@@ -121,7 +143,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     })
 
     const [state, setState] = createStore({
-      active: props.defaultServer,
+      active: resolvedDefaultServer,
       healthy: undefined as boolean | undefined,
     })
 
@@ -176,7 +198,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
         setStore("list", list)
         if (state.active === key) {
           const next = list[0]
-          setState("active", next ? ServerConnection.key({ type: "http", http: { url: next } }) : props.defaultServer)
+          setState("active", next ? ServerConnection.key({ type: "http", http: { url: next } }) : resolvedDefaultServer)
         }
       })
     }
@@ -185,6 +207,27 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
 
     const fetcher = platform.fetch ?? globalThis.fetch
     const check = (conn: ServerConnection.Any) => checkServerHealth(conn.http, fetcher).then((x) => x.healthy)
+    const identity = async (conn: ServerConnection.Any) => {
+      const key = ServerConnection.key(conn)
+      const response = await fetcher(`${conn.http.url}/global/identity`).catch(() => undefined)
+      if (!response?.ok) {
+        setStore("identityError", key, `status:${response?.status ?? 0}`)
+        return
+      }
+      const data = (await response.json().catch(() => undefined)) as Identity | undefined
+      if (!data?.instanceID) {
+        setStore("identityError", key, "missing:instanceID")
+        return
+      }
+      batch(() => {
+        setStore("identity", key, data.instanceID)
+        setStore("identityError", key, "")
+      })
+    }
+
+    const current: Accessor<ServerConnection.Any | undefined> = createMemo(
+      () => allServers().find((s) => ServerConnection.key(s) === state.active) ?? allServers()[0],
+    )
 
     createEffect(() => {
       const current_ = current()
@@ -193,12 +236,14 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       setState("healthy", undefined)
       onCleanup(startHealthPolling(current_))
     })
+    createEffect(() => {
+      const current_ = current()
+      if (!current_) return
+      void identity(current_)
+    })
 
     const origin = createMemo(() => projectsKey(state.active))
     const projectsList = createMemo(() => store.projects[origin()] ?? [])
-    const current: Accessor<ServerConnection.Any | undefined> = createMemo(
-      () => allServers().find((s) => ServerConnection.key(s) === state.active) ?? allServers()[0],
-    )
     const isLocal = createMemo(() => {
       const c = current()
       return (c?.type === "sidecar" && c.variant === "base") || (c?.type === "http" && isLocalHost(c.http.url))
@@ -211,6 +256,9 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       get key() {
         return state.active
       },
+      get url() {
+        return current()?.http.url ?? ""
+      },
       get name() {
         return serverDisplayName(current())
       },
@@ -219,6 +267,16 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       },
       get current() {
         return current()
+      },
+      identity() {
+        const conn = current()
+        if (!conn) return
+        return store.identity[ServerConnection.key(conn)]
+      },
+      identityError() {
+        const conn = current()
+        if (!conn) return
+        return store.identityError[ServerConnection.key(conn)]
       },
       setActive,
       add,

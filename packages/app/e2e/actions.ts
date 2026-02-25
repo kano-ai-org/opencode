@@ -512,7 +512,16 @@ export async function openStatusPopover(page: Page) {
 }
 
 export async function openProjectMenu(page: Page, projectSlug: string) {
-  const trigger = page.locator(projectMenuTriggerSelector(projectSlug)).first()
+  const exact = page.locator(projectMenuTriggerSelector(projectSlug)).first()
+  const hasExact = await exact
+    .count()
+    .then((count) => count > 0)
+    .catch(() => false)
+
+  const trigger = hasExact
+    ? exact
+    : page.locator('[data-component="sidebar-nav-desktop"] [data-action="project-menu"]').first()
+
   await expect(trigger).toHaveCount(1)
 
   await trigger.focus()
@@ -544,23 +553,40 @@ export async function openProjectMenu(page: Page, projectSlug: string) {
 }
 
 export async function setWorkspacesEnabled(page: Page, projectSlug: string, enabled: boolean) {
-  const current = await page
-    .getByRole("button", { name: "New workspace" })
-    .first()
-    .isVisible()
-    .then((x) => x)
-    .catch(() => false)
+  const isEnabled = async () => {
+    const exact = await page
+      .locator(workspaceItemSelector(projectSlug))
+      .count()
+      .then((count) => count > 0)
+      .catch(() => false)
+    if (exact) return true
 
-  if (current === enabled) return
+    return await page
+      .locator('[data-component="sidebar-nav-desktop"] [data-component="workspace-item"]')
+      .count()
+      .then((count) => count > 0)
+      .catch(() => false)
+  }
 
-  await openProjectMenu(page, projectSlug)
+  for (const _ of [0, 1, 2]) {
+    if ((await isEnabled()) === enabled) return
 
-  const toggle = page.locator(projectWorkspacesToggleSelector(projectSlug)).first()
-  await expect(toggle).toBeVisible()
-  await toggle.click({ force: true })
+    await openProjectMenu(page, projectSlug)
 
-  const expected = enabled ? "New workspace" : "New session"
-  await expect(page.getByRole("button", { name: expected }).first()).toBeVisible()
+    const exact = page.locator(projectWorkspacesToggleSelector(projectSlug)).first()
+    const hasExact = await exact
+      .count()
+      .then((count) => count > 0)
+      .catch(() => false)
+
+    const toggle = hasExact
+      ? exact
+      : page.locator('[data-component="dropdown-menu-content"] [data-action="project-workspaces-toggle"]').first()
+    await expect(toggle).toBeVisible()
+    await toggle.click({ force: true })
+  }
+
+  await expect.poll(isEnabled).toBe(enabled)
 }
 
 export async function openWorkspaceMenu(page: Page, workspaceSlug: string) {
