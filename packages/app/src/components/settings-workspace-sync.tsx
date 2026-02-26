@@ -66,6 +66,9 @@ export const SettingsWorkspaceSync: Component = () => {
     busy: false,
     url: "",
   })
+  const [search, setSearch] = createStore({
+    query: "",
+  })
   const [detail, setDetail] = createStore({
     worktree: "",
     showSubagent: false,
@@ -79,6 +82,16 @@ export const SettingsWorkspaceSync: Component = () => {
 
   const local = createMemo(() => layout.workspaceSync.localKeys())
   const rows = createMemo(() => snapshot() ?? [])
+  const query = createMemo(() => search.query.trim().toLowerCase())
+  const filteredRows = createMemo(() => {
+    const input = query()
+    if (!input) return rows()
+    return rows().filter((row) => {
+      const text = [row.worktree, row.projectID, row.source, ...row.sandboxes].join("\n").toLowerCase()
+      return text.includes(input)
+    })
+  })
+  const filteredPreview = createMemo(() => filteredRows().slice(0, 20))
   const sourceRows = createMemo(() => ({
     merged: rows().filter(
       (row) =>
@@ -425,6 +438,41 @@ export const SettingsWorkspaceSync: Component = () => {
               }
             >
             <Tabs.Content value="overview" class="flex flex-col gap-6">
+              <div class="border border-border-weak-base rounded-lg p-4 bg-surface-raised-base">
+                <div class="text-13-medium text-text-strong mb-2">Workspace search</div>
+                <TextField
+                  type="text"
+                  hideLabel
+                  placeholder="Search workspace path, projectID, source..."
+                  value={search.query}
+                  onChange={(value) => setSearch("query", value)}
+                />
+                <div class="pt-2 text-11-regular text-text-weak">
+                  {query() ? `${filteredRows().length} match(es)` : `${rows().length} total workspace(s)`}
+                </div>
+                <div class="pt-3 flex flex-col gap-2 max-h-56 overflow-y-auto pr-1">
+                  <For each={filteredPreview()}>
+                    {(row) => (
+                      <div class="flex items-center justify-between gap-2 border border-border-weak-base rounded-md px-2 py-2 bg-surface-base">
+                        <div class="min-w-0 flex items-center gap-2">
+                          <WorkspaceIcon icon={row.icon} title={row.worktree} />
+                          <div class="text-12-regular text-text-strong break-all">{row.worktree}</div>
+                        </div>
+                        <Button variant="secondary" size="small" class="min-h-8 px-3 shrink-0" onClick={() => openProject(row.worktree)}>
+                          Open
+                        </Button>
+                      </div>
+                    )}
+                  </For>
+                  {query() && filteredRows().length > filteredPreview().length ? (
+                    <div class="text-11-regular text-text-weak">Showing first {filteredPreview().length} results</div>
+                  ) : null}
+                  {query() && filteredRows().length === 0 ? (
+                    <div class="text-12-regular text-text-weak">No workspace matched this query.</div>
+                  ) : null}
+                </div>
+              </div>
+
               <div class="border border-border-weak-base rounded-lg p-4 bg-surface-raised-base">
                 <div class="text-13-medium text-text-strong mb-2">Session transfer</div>
                 <div class="flex flex-wrap gap-2">

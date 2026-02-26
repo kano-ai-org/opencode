@@ -1,5 +1,7 @@
 import { Component } from "solid-js"
+import { createStore } from "solid-js/store"
 import { Dialog } from "@opencode-ai/ui/dialog"
+import { Button } from "@opencode-ai/ui/button"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { Icon } from "@opencode-ai/ui/icon"
 import { useLanguage } from "@/context/language"
@@ -15,13 +17,49 @@ import { SettingsWorkspaceSync } from "./settings-workspace-sync"
 export const DialogSettings: Component = () => {
   const language = useLanguage()
   const platform = usePlatform()
+  const [view, setView] = createStore({
+    zoom: 1 as 0 | 1 | 2,
+  })
   const branch = import.meta.env.VITE_APP_GIT_BRANCH || "unknown"
   const revision = import.meta.env.VITE_APP_GIT_REVISION || "unknown"
   const revisionNumber = import.meta.env.VITE_APP_GIT_REVISION_NUMBER || "unknown"
 
+  const zoomClass = () => {
+    if (view.zoom === 0) return "settings-dialog-compact"
+    if (view.zoom === 2) return "settings-dialog-expanded"
+    return "settings-dialog-normal"
+  }
+
+  const zoomOut = () => setView("zoom", (value) => (value > 0 ? ((value - 1) as 0 | 1 | 2) : value))
+  const zoomIn = () => setView("zoom", (value) => (value < 2 ? ((value + 1) as 0 | 1 | 2) : value))
+  const zoomReset = () => setView("zoom", 1)
+
   return (
-    <Dialog size="x-large" transition>
-      <Tabs orientation="vertical" variant="settings" defaultValue="general" class="h-full settings-dialog">
+    <Dialog size="x-large" transition containerClass={`settings-dialog-shell ${zoomClass()}`}>
+      <Tabs orientation="vertical" variant="settings" defaultValue="general" class="h-full settings-dialog relative">
+        <div class="settings-dialog-zoom-controls">
+          <Button
+            variant="secondary"
+            size="small"
+            aria-label="Zoom out settings"
+            onClick={zoomOut}
+            disabled={view.zoom === 0}
+          >
+            -
+          </Button>
+          <Button variant="secondary" size="small" aria-label="Reset settings size" onClick={zoomReset}>
+            100%
+          </Button>
+          <Button
+            variant="secondary"
+            size="small"
+            aria-label="Zoom in settings"
+            onClick={zoomIn}
+            disabled={view.zoom === 2}
+          >
+            +
+          </Button>
+        </div>
         <Tabs.List>
           <div class="flex flex-col justify-between h-full w-full">
             <div class="flex flex-col gap-3 w-full pt-3">
