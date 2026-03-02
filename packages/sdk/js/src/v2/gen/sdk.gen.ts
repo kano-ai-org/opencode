@@ -41,6 +41,7 @@ import type {
   GlobalDisposeResponses,
   GlobalEventResponses,
   GlobalHealthResponses,
+  GlobalIdentityResponses,
   InstanceDisposeResponses,
   LspStatusResponses,
   McpAddErrors,
@@ -72,9 +73,18 @@ import type {
   PermissionRespondResponses,
   PermissionRuleset,
   ProjectCurrentResponses,
+  ProjectDeleteErrors,
+  ProjectDeleteResponses,
   ProjectListResponses,
   ProjectUpdateErrors,
   ProjectUpdateResponses,
+  ProjectWorkspacePathsErrors,
+  ProjectWorkspacePathsResponses,
+  ProjectWorkspaceToggles,
+  ProjectWorkspaceTogglesErrors,
+  ProjectWorkspaceTogglesPatchErrors,
+  ProjectWorkspaceTogglesPatchResponses,
+  ProjectWorkspaceTogglesResponses,
   ProviderAuthResponses,
   ProviderListResponses,
   ProviderOauthAuthorizeErrors,
@@ -111,9 +121,12 @@ import type {
   SessionDeleteMessageResponses,
   SessionDeleteResponses,
   SessionDiffResponses,
+  SessionExportResponses,
   SessionForkResponses,
   SessionGetErrors,
   SessionGetResponses,
+  SessionImportErrors,
+  SessionImportResponses,
   SessionInitErrors,
   SessionInitResponses,
   SessionListResponses,
@@ -274,6 +287,18 @@ export class Global extends HeyApiClient {
   }
 
   /**
+   * Get server identity
+   *
+   * Get a persistent instance identity for this server and its storage paths.
+   */
+  public identity<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalIdentityResponses, unknown, ThrowOnError>({
+      url: "/global/identity",
+      ...options,
+    })
+  }
+
+  /**
    * Get global events
    *
    * Subscribe to global events from the OpenCode system using server-sent events.
@@ -399,6 +424,36 @@ export class Project extends HeyApiClient {
   }
 
   /**
+   * Delete project
+   *
+   * Delete a project and cascade delete dependent data such as sessions.
+   */
+  public delete<ThrowOnError extends boolean = false>(
+    parameters: {
+      projectID: string
+      directory?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "projectID" },
+            { in: "query", key: "directory" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<ProjectDeleteResponses, ProjectDeleteErrors, ThrowOnError>({
+      url: "/project/{projectID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Update project
    *
    * Update project properties such as name, icon, and commands.
@@ -445,6 +500,115 @@ export class Project extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get workspace toggles
+   *
+   * Get the persisted workspace visibility toggles for a project.
+   */
+  public workspaceToggles<ThrowOnError extends boolean = false>(
+    parameters: {
+      projectID: string
+      directory?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "projectID" },
+            { in: "query", key: "directory" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ProjectWorkspaceTogglesResponses,
+      ProjectWorkspaceTogglesErrors,
+      ThrowOnError
+    >({
+      url: "/project/{projectID}/workspace-toggles",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Update workspace toggles
+   *
+   * Update persisted workspace visibility toggles for a project.
+   */
+  public workspaceTogglesPatch<ThrowOnError extends boolean = false>(
+    parameters: {
+      projectID: string
+      directory?: string
+      projectWorkspaceToggles?: ProjectWorkspaceToggles
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "projectID" },
+            { in: "query", key: "directory" },
+            { key: "projectWorkspaceToggles", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<
+      ProjectWorkspaceTogglesPatchResponses,
+      ProjectWorkspaceTogglesPatchErrors,
+      ThrowOnError
+    >({
+      url: "/project/{projectID}/workspace-toggles",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get workspace path status
+   *
+   * Get path existence status for project worktree and sandboxes.
+   */
+  public workspacePaths<ThrowOnError extends boolean = false>(
+    parameters: {
+      projectID: string
+      directory?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "projectID" },
+            { in: "query", key: "directory" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ProjectWorkspacePathsResponses,
+      ProjectWorkspacePathsErrors,
+      ThrowOnError
+    >({
+      url: "/project/{projectID}/workspace-paths",
+      ...options,
+      ...params,
     })
   }
 }
@@ -985,6 +1149,7 @@ export class Session2 extends HeyApiClient {
   public list<ThrowOnError extends boolean = false>(
     parameters?: {
       directory?: string
+      projectID?: string
       roots?: boolean
       start?: number
       search?: string
@@ -998,6 +1163,7 @@ export class Session2 extends HeyApiClient {
         {
           args: [
             { in: "query", key: "directory" },
+            { in: "query", key: "projectID" },
             { in: "query", key: "roots" },
             { in: "query", key: "start" },
             { in: "query", key: "search" },
@@ -1049,6 +1215,44 @@ export class Session2 extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Export sessions
+   *
+   * Export projects/sessions/messages into a portable JSON bundle.
+   */
+  public export<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "directory" }] }])
+    return (options?.client ?? this.client).get<SessionExportResponses, unknown, ThrowOnError>({
+      url: "/session/export",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Import sessions
+   *
+   * Import projects/sessions/messages from uploaded file or remote URL.
+   */
+  public import<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "directory" }] }])
+    return (options?.client ?? this.client).post<SessionImportResponses, SessionImportErrors, ThrowOnError>({
+      url: "/session/import",
+      ...options,
+      ...params,
     })
   }
 

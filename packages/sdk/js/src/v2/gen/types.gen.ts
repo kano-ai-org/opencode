@@ -1518,6 +1518,13 @@ export type NotFoundError = {
   }
 }
 
+export type ProjectWorkspaceToggles = {
+  version: number
+  toggles: {
+    [key: string]: boolean
+  }
+}
+
 export type Model = {
   id: string
   providerID: string
@@ -1893,6 +1900,27 @@ export type GlobalHealthResponses = {
 
 export type GlobalHealthResponse = GlobalHealthResponses[keyof GlobalHealthResponses]
 
+export type GlobalIdentityData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/identity"
+}
+
+export type GlobalIdentityResponses = {
+  /**
+   * Server identity
+   */
+  200: {
+    instanceID: string
+    state: string
+    data: string
+    config: string
+  }
+}
+
+export type GlobalIdentityResponse = GlobalIdentityResponses[keyof GlobalIdentityResponses]
+
 export type GlobalEventData = {
   body?: never
   path?: never
@@ -2056,6 +2084,39 @@ export type ProjectCurrentResponses = {
 
 export type ProjectCurrentResponse = ProjectCurrentResponses[keyof ProjectCurrentResponses]
 
+export type ProjectDeleteData = {
+  body?: never
+  path: {
+    projectID: string
+  }
+  query?: {
+    directory?: string
+  }
+  url: "/project/{projectID}"
+}
+
+export type ProjectDeleteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ProjectDeleteError = ProjectDeleteErrors[keyof ProjectDeleteErrors]
+
+export type ProjectDeleteResponses = {
+  /**
+   * Project deleted
+   */
+  200: boolean
+}
+
+export type ProjectDeleteResponse = ProjectDeleteResponses[keyof ProjectDeleteResponses]
+
 export type ProjectUpdateData = {
   body?: {
     name?: string
@@ -2101,6 +2162,106 @@ export type ProjectUpdateResponses = {
 }
 
 export type ProjectUpdateResponse = ProjectUpdateResponses[keyof ProjectUpdateResponses]
+
+export type ProjectWorkspaceTogglesData = {
+  body?: never
+  path: {
+    projectID: string
+  }
+  query?: {
+    directory?: string
+  }
+  url: "/project/{projectID}/workspace-toggles"
+}
+
+export type ProjectWorkspaceTogglesErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ProjectWorkspaceTogglesError = ProjectWorkspaceTogglesErrors[keyof ProjectWorkspaceTogglesErrors]
+
+export type ProjectWorkspaceTogglesResponses = {
+  /**
+   * Workspace toggle state
+   */
+  200: ProjectWorkspaceToggles
+}
+
+export type ProjectWorkspaceTogglesResponse = ProjectWorkspaceTogglesResponses[keyof ProjectWorkspaceTogglesResponses]
+
+export type ProjectWorkspaceTogglesPatchData = {
+  body?: ProjectWorkspaceToggles
+  path: {
+    projectID: string
+  }
+  query?: {
+    directory?: string
+  }
+  url: "/project/{projectID}/workspace-toggles"
+}
+
+export type ProjectWorkspaceTogglesPatchErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+  /**
+   * Conflict due to stale version
+   */
+  409: ProjectWorkspaceToggles
+}
+
+export type ProjectWorkspaceTogglesPatchError =
+  ProjectWorkspaceTogglesPatchErrors[keyof ProjectWorkspaceTogglesPatchErrors]
+
+export type ProjectWorkspaceTogglesPatchResponses = {
+  /**
+   * Workspace toggle state after update
+   */
+  200: ProjectWorkspaceToggles
+}
+
+export type ProjectWorkspaceTogglesPatchResponse =
+  ProjectWorkspaceTogglesPatchResponses[keyof ProjectWorkspaceTogglesPatchResponses]
+
+export type ProjectWorkspacePathsData = {
+  body?: never
+  path: {
+    projectID: string
+  }
+  query?: {
+    directory?: string
+  }
+  url: "/project/{projectID}/workspace-paths"
+}
+
+export type ProjectWorkspacePathsErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ProjectWorkspacePathsError = ProjectWorkspacePathsErrors[keyof ProjectWorkspacePathsErrors]
+
+export type ProjectWorkspacePathsResponses = {
+  /**
+   * Workspace path status
+   */
+  200: {
+    projectID: string
+    paths: Array<{
+      path: string
+      kind: "worktree" | "sandbox"
+      exists: boolean
+    }>
+  }
+}
+
+export type ProjectWorkspacePathsResponse = ProjectWorkspacePathsResponses[keyof ProjectWorkspacePathsResponses]
 
 export type PtyListData = {
   body?: never
@@ -2575,6 +2736,10 @@ export type SessionListData = {
      */
     directory?: string
     /**
+     * Filter sessions by project ID
+     */
+    projectID?: string
+    /**
      * Only return root sessions (no parentID)
      */
     roots?: boolean
@@ -2633,6 +2798,51 @@ export type SessionCreateResponses = {
 }
 
 export type SessionCreateResponse = SessionCreateResponses[keyof SessionCreateResponses]
+
+export type SessionExportData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+  }
+  url: "/session/export"
+}
+
+export type SessionExportResponses = {
+  /**
+   * Session export bundle
+   */
+  200: unknown
+}
+
+export type SessionImportData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+  }
+  url: "/session/import"
+}
+
+export type SessionImportErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SessionImportError = SessionImportErrors[keyof SessionImportErrors]
+
+export type SessionImportResponses = {
+  /**
+   * Import summary
+   */
+  200: {
+    [key: string]: number
+  }
+}
+
+export type SessionImportResponse = SessionImportResponses[keyof SessionImportResponses]
 
 export type SessionStatusData = {
   body?: never
