@@ -6,6 +6,7 @@ import { Installation } from "../installation"
 import { Flag } from "../flag/flag"
 import { lazy } from "@/util/lazy"
 import { Filesystem } from "../util/filesystem"
+import fs from "fs/promises"
 
 // Try to import bundled snapshot (generated at build time)
 // Falls back to undefined in dev mode when snapshot doesn't exist
@@ -88,14 +89,18 @@ export namespace ModelsDev {
   export const Data = lazy(async () => {
     const result = await Filesystem.readJson(Flag.OPENCODE_MODELS_PATH ?? filepath).catch(() => {})
     if (result) return result
+    if (Flag.OPENCODE_DISABLE_MODELS_FETCH) return {}
+    const remote = await fetch(`${url()}/api.json`)
+      .then((x) => x.text())
+      .then((x) => JSON.parse(x) as Record<string, unknown>)
+      .catch(() => undefined)
+    if (remote && Object.keys(remote).length > 0) return remote
     // @ts-ignore
     const snapshot = await import("./models-snapshot.js")
       .then((m) => m.snapshot as Record<string, unknown>)
       .catch(() => undefined)
     if (snapshot) return snapshot
-    if (Flag.OPENCODE_DISABLE_MODELS_FETCH) return {}
-    const json = await fetch(`${url()}/api.json`).then((x) => x.text())
-    return JSON.parse(json)
+    return {}
   })
 
   export async function get() {
@@ -104,6 +109,29 @@ export namespace ModelsDev {
   }
 
   export async function refresh() {
+    const file = Flag.OPENCODE_MODELS_PATH ?? filepath
+    const temp = `${file}.tmp-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+
+    const restore = async () => {
+      // @ts-ignore
+      const snapshot = await import("./models-snapshot")
+        .then((m) => m.snapshot as Record<string, unknown> | undefined)
+        .catch(() => undefined)
+      if (!snapshot || Object.keys(snapshot).length === 0) return false
+      await fs.mkdir(path.dirname(file), { recursive: true }).catch(() => {})
+      const text = JSON.stringify(snapshot)
+      await Filesystem.write(temp, text)
+      await fs.rm(file, { force: true }).catch(() => {})
+      const moved = await fs.rename(temp, file).then(() => true).catch(() => false)
+      if (!moved) {
+        await Filesystem.write(file, text)
+        await fs.rm(temp, { force: true }).catch(() => {})
+      }
+      ModelsDev.Data.reset()
+      log.info("Restored models cache from bundled snapshot")
+      return true
+    }
+
     const result = await fetch(`${url()}/api.json`, {
       headers: {
         "User-Agent": Installation.USER_AGENT,
@@ -114,10 +142,28 @@ export namespace ModelsDev {
         error: e,
       })
     })
-    if (result && result.ok) {
-      await Filesystem.write(filepath, await result.text())
-      ModelsDev.Data.reset()
+    if (!result || !result.ok) {
+      if ((await Filesystem.size(file).catch(() => 0)) === 0) await restore()
+      return
     }
+
+    const data = await result.json().catch(() => undefined)
+    if (!data || typeof data !== "object" || Array.isArray(data) || Object.keys(data).length === 0) {
+      log.error("Refusing to overwrite models cache with invalid payload")
+      if ((await Filesystem.size(file).catch(() => 0)) === 0) await restore()
+      return
+    }
+
+    const text = JSON.stringify(data)
+    await fs.mkdir(path.dirname(file), { recursive: true }).catch(() => {})
+    await Filesystem.write(temp, text)
+    await fs.rm(file, { force: true }).catch(() => {})
+    const moved = await fs.rename(temp, file).then(() => true).catch(() => false)
+    if (!moved) {
+      await Filesystem.write(file, text)
+      await fs.rm(temp, { force: true }).catch(() => {})
+    }
+    ModelsDev.Data.reset()
   }
 }
 
