@@ -15,6 +15,7 @@ import { existsSync } from "fs"
 
 import { realpath } from "fs/promises"
 import { git } from "../util/git"
+import { which } from "../util/which"
 
 export namespace Project {
   const log = Log.create({ service: "project" })

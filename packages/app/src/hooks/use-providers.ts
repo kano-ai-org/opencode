@@ -20,11 +20,24 @@ export function useProviders() {
   const params = useParams()
   const currentDirectory = createMemo(() => decode64(params.dir) ?? "")
   const providers = createMemo(() => {
-    if (currentDirectory()) {
-      const [projectStore] = globalSync.child(currentDirectory())
-      return projectStore.provider
-    }
-    return globalSync.data.provider
+    const global = globalSync.data.provider
+    const directory = currentDirectory()
+    if (!directory) return global
+    const [projectStore] = globalSync.child(directory)
+    const project = projectStore.provider
+    if (!project.all.length) return global
+
+    const count = (input: typeof global) =>
+      new Map(input.all.map((provider) => [provider.id, Object.keys(provider.models).length]))
+
+    const fresh = (() => {
+      const projectCount = count(project)
+      const globalCount = count(global)
+      return global.connected.every((id) => (projectCount.get(id) ?? 0) >= (globalCount.get(id) ?? 0))
+    })()
+
+    if (!fresh) return global
+    return project
   })
   const connectedIDs = createMemo(() => new Set(providers().connected))
   const connected = createMemo(() => providers().all.filter((p) => connectedIDs().has(p.id)))
