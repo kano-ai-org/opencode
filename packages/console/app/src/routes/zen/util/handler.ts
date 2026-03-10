@@ -24,13 +24,7 @@ import {
   FreeUsageLimitError,
   SubscriptionUsageLimitError,
 } from "./error"
-import {
-  buildCostChunk,
-  createBodyConverter,
-  createStreamPartConverter,
-  createResponseConverter,
-  UsageInfo,
-} from "./provider/provider"
+import { createBodyConverter, createStreamPartConverter, createResponseConverter, UsageInfo } from "./provider/provider"
 import { anthropicHelper } from "./provider/anthropic"
 import { googleHelper } from "./provider/google"
 import { openaiHelper } from "./provider/openai"
@@ -50,6 +44,25 @@ type RetryOptions = {
   retryCount: number
 }
 type BillingSource = "anonymous" | "free" | "byok" | "subscription" | "lite" | "balance"
+
+function copilotResponses(model: string) {
+  return /^(gpt-|o\d|codex-|computer-use|grok)/.test(model)
+}
+
+function helper(input: {
+  format?: ZenData.Format
+  providerID: string
+  reqModel: string
+  providerModel: string
+}) {
+  if (input.providerID.includes("github-copilot") && copilotResponses(input.providerModel)) {
+    return openaiHelper({ reqModel: input.reqModel, providerModel: input.providerModel })
+  }
+  if (input.format === "anthropic") return anthropicHelper({ reqModel: input.reqModel, providerModel: input.providerModel })
+  if (input.format === "google") return googleHelper({ reqModel: input.reqModel, providerModel: input.providerModel })
+  if (input.format === "openai") return openaiHelper({ reqModel: input.reqModel, providerModel: input.providerModel })
+  return oaCompatHelper({ reqModel: input.reqModel, providerModel: input.providerModel })
+}
 
 function resolve(text: string, params?: Record<string, string | number>) {
   if (!params) return text
@@ -80,9 +93,8 @@ export async function handler(
   const dict = i18n(localeFromRequest(input.request))
   const t = (key: Key, params?: Record<string, string | number>) => resolve(dict[key], params)
   const ADMIN_WORKSPACES = [
-    "wrk_01K46JDFR0E75SG2Q8K172KF3Y", // anomaly
-    "wrk_01K6W1A3VE0KMNVSCQT43BG2SX", // benchmark
-    "wrk_01KKZDKDWCS1VTJF8QTX62DD50", // contributors
+    "wrk_01K46JDFR0E75SG2Q8K172KF3Y", // frank
+    "wrk_01K6W1A3VE0KMNVSCQT43BG2SX", // opencode bench
   ]
 
   try {
@@ -96,7 +108,7 @@ export async function handler(
     const projectId = input.request.headers.get("x-opencode-project") ?? ""
     const ocClient = input.request.headers.get("x-opencode-client") ?? ""
     logger.metric({
-      is_stream: isStream,
+      is_tream: isStream,
       session: sessionId,
       request: requestId,
       client: ocClient,
@@ -104,15 +116,9 @@ export async function handler(
     const zenData = ZenData.list(opts.modelList)
     const modelInfo = validateModel(zenData, model)
     const dataDumper = createDataDumper(sessionId, requestId, projectId)
-    const trialLimiter = createTrialLimiter(modelInfo.trialProviders, ip)
-    const trialProviders = await trialLimiter?.check()
-    const rateLimiter = createRateLimiter(
-      modelInfo.id,
-      modelInfo.allowAnonymous,
-      modelInfo.rateLimit,
-      ip,
-      input.request,
-    )
+    const trialLimiter = createTrialLimiter(modelInfo.trialProvider, ip)
+    const trialProvider = await trialLimiter?.check()
+    const rateLimiter = createRateLimiter(modelInfo.allowAnonymous, ip, input.request)
     await rateLimiter?.check()
     const stickyTracker = createStickyTracker(modelInfo.stickyProvider, sessionId)
     const stickyProvider = await stickyTracker?.get()
@@ -126,29 +132,26 @@ export async function handler(
         zenData,
         authInfo,
         modelInfo,
-        ip,
         sessionId,
-        trialProviders,
+        trialProvider,
         retry,
         stickyProvider,
       )
-      validateModelSettings(billingSource, authInfo)
+      validateModelSettings(authInfo)
       updateProviderKey(authInfo, providerInfo)
       logger.metric({ provider: providerInfo.id })
 
       const startTimestamp = Date.now()
       const reqUrl = providerInfo.modifyUrl(providerInfo.api, isStream)
       const reqBody = JSON.stringify(
-        providerInfo.modifyBody({
-          ...createBodyConverter(opts.format, providerInfo.format)(body),
-          model: providerInfo.model,
-          ...(providerInfo.payloadModifier ?? {}),
-          ...Object.fromEntries(
-            Object.entries(providerInfo.payloadMappings ?? {})
-              .map(([k, v]) => [k, input.request.headers.get(v)])
-              .filter(([_k, v]) => !!v),
-          ),
-        }),
+        providerInfo.modifyBody(
+          {
+            ...createBodyConverter(opts.format, providerInfo.format)(body),
+            model: providerInfo.model,
+            ...(providerInfo.payloadModifier ?? {}),
+          },
+          authInfo?.workspaceID,
+        ),
       )
       logger.debug("REQUEST URL: " + reqUrl)
       logger.debug("REQUEST: " + reqBody.substring(0, 300) + "...")
@@ -233,7 +236,7 @@ export async function handler(
       const body = JSON.stringify(
         responseConverter({
           ...json,
-          cost: calculateOccurredCost(billingSource, costInfo),
+          cost: calculateOccuredCost(billingSource, costInfo),
         }),
       )
       logger.metric({ response_length: body.length })
@@ -277,8 +280,8 @@ export async function handler(
                   await trialLimiter?.track(usageInfo)
                   await trackUsage(sessionId, billingSource, authInfo, modelInfo, providerInfo, usageInfo, costInfo)
                   await reload(billingSource, authInfo, costInfo)
-                  const cost = calculateOccurredCost(billingSource, costInfo)
-                  c.enqueue(encoder.encode(buildCostChunk(opts.format, cost)))
+                  const cost = calculateOccuredCost(billingSource, costInfo)
+                  c.enqueue(encoder.encode(usageParser.buidlCostChunk(cost)))
                 }
                 c.close()
                 return
@@ -335,15 +338,7 @@ export async function handler(
     logger.metric({
       "error.type": error.constructor.name,
       "error.message": error.message,
-      "error.cause": error.cause?.toString(),
     })
-    if (error.message.startsWith("Failed query")) {
-      try {
-        logger.metric({
-          "error.cause2": JSON.stringify(error.cause),
-        })
-      } catch (e) {}
-    }
 
     // Note: both top level "type" and "error.type" fields are used by the @ai-sdk/anthropic client to render the error message.
     if (
@@ -413,9 +408,8 @@ export async function handler(
     zenData: ZenData,
     authInfo: AuthInfo,
     modelInfo: ModelInfo,
-    ip: string,
     sessionId: string,
-    trialProviders: string[] | undefined,
+    trialProvider: string | undefined,
     retry: RetryOptions,
     stickyProvider: string | undefined,
   ) {
@@ -424,14 +418,12 @@ export async function handler(
         return modelInfo.providers.find((provider) => provider.id === modelInfo.byokProvider)
       }
 
-      if (stickyProvider) {
-        const provider = modelInfo.providers.find((provider) => provider.id === stickyProvider)
-        if (provider) return provider
+      if (trialProvider) {
+        return modelInfo.providers.find((provider) => provider.id === trialProvider)
       }
 
-      if (trialProviders) {
-        const trialProvider = trialProviders[Math.floor(Math.random() * trialProviders.length)]
-        const provider = modelInfo.providers.find((provider) => provider.id === trialProvider)
+      if (stickyProvider) {
+        const provider = modelInfo.providers.find((provider) => provider.id === stickyProvider)
         if (provider) return provider
       }
 
@@ -442,11 +434,10 @@ export async function handler(
           .flatMap((provider) => Array<typeof provider>(provider.weight ?? 1).fill(provider))
 
         // Use the last 4 characters of session ID to select a provider
-        const identifier = sessionId.length ? sessionId : ip
         let h = 0
-        const l = identifier.length
+        const l = sessionId.length
         for (let i = l - 4; i < l; i++) {
-          h = (h * 31 + identifier.charCodeAt(i)) | 0 // 32-bit int
+          h = (h * 31 + sessionId.charCodeAt(i)) | 0 // 32-bit int
         }
         const index = (h >>> 0) % providers.length // make unsigned + range 0..length-1
         const provider = providers[index || 0]
@@ -464,21 +455,12 @@ export async function handler(
     return {
       ...modelProvider,
       ...zenData.providers[modelProvider.id],
-      ...(() => {
-        const providerProps = zenData.providers[modelProvider.id]
-        const format = providerProps.format
-        const opts = {
-          reqModel,
-          providerModel: modelProvider.model,
-          adjustCacheUsage: providerProps.adjustCacheUsage,
-          safetyIdentifier: modelProvider.safetyIdentifier ? ip : undefined,
-          workspaceID: authInfo?.workspaceID,
-        }
-        if (format === "anthropic") return anthropicHelper(opts)
-        if (format === "google") return googleHelper(opts)
-        if (format === "openai") return openaiHelper(opts)
-        return oaCompatHelper(opts)
-      })(),
+      ...helper({
+        format: zenData.providers[modelProvider.id].format,
+        providerID: modelProvider.id,
+        reqModel,
+        providerModel: modelProvider.model,
+      }),
     }
   }
 
@@ -767,10 +749,9 @@ export async function handler(
     return "balance"
   }
 
-  function validateModelSettings(billingSource: BillingSource, authInfo: AuthInfo) {
-    if (billingSource === "lite") return
-    if (billingSource === "anonymous") return
-    if (authInfo!.isDisabled) throw new ModelError(t("zen.api.error.modelDisabled"))
+  function validateModelSettings(authInfo: AuthInfo) {
+    if (!authInfo) return
+    if (authInfo.isDisabled) throw new ModelError(t("zen.api.error.modelDisabled"))
   }
 
   function updateProviderKey(authInfo: AuthInfo, providerInfo: ProviderInfo) {
@@ -836,7 +817,7 @@ export async function handler(
     }
   }
 
-  function calculateOccurredCost(billingSource: BillingSource, costInfo: CostInfo) {
+  function calculateOccuredCost(billingSource: BillingSource, costInfo: CostInfo) {
     return billingSource === "balance" ? (costInfo.totalCostInCent / 100).toFixed(8) : "0"
   }
 
