@@ -45,6 +45,25 @@ type RetryOptions = {
 }
 type BillingSource = "anonymous" | "free" | "byok" | "subscription" | "lite" | "balance"
 
+function copilotResponses(model: string) {
+  return /^(gpt-|o\d|codex-|computer-use|grok)/.test(model)
+}
+
+function helper(input: {
+  format?: ZenData.Format
+  providerID: string
+  reqModel: string
+  providerModel: string
+}) {
+  if (input.providerID.includes("github-copilot") && copilotResponses(input.providerModel)) {
+    return openaiHelper({ reqModel: input.reqModel, providerModel: input.providerModel })
+  }
+  if (input.format === "anthropic") return anthropicHelper({ reqModel: input.reqModel, providerModel: input.providerModel })
+  if (input.format === "google") return googleHelper({ reqModel: input.reqModel, providerModel: input.providerModel })
+  if (input.format === "openai") return openaiHelper({ reqModel: input.reqModel, providerModel: input.providerModel })
+  return oaCompatHelper({ reqModel: input.reqModel, providerModel: input.providerModel })
+}
+
 function resolve(text: string, params?: Record<string, string | number>) {
   if (!params) return text
   return text.replace(/\{\{(\w+)\}\}/g, (raw, key) => {
@@ -436,14 +455,12 @@ export async function handler(
     return {
       ...modelProvider,
       ...zenData.providers[modelProvider.id],
-      ...(() => {
-        const format = zenData.providers[modelProvider.id].format
-        const providerModel = modelProvider.model
-        if (format === "anthropic") return anthropicHelper({ reqModel, providerModel })
-        if (format === "google") return googleHelper({ reqModel, providerModel })
-        if (format === "openai") return openaiHelper({ reqModel, providerModel })
-        return oaCompatHelper({ reqModel, providerModel })
-      })(),
+      ...helper({
+        format: zenData.providers[modelProvider.id].format,
+        providerID: modelProvider.id,
+        reqModel,
+        providerModel: modelProvider.model,
+      }),
     }
   }
 
