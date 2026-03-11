@@ -46,7 +46,9 @@ type RetryOptions = {
 type BillingSource = "anonymous" | "free" | "byok" | "subscription" | "lite" | "balance"
 
 function copilotResponses(model: string) {
-  return /^(gpt-|o\d|codex-|computer-use|grok)/.test(model)
+  const match = /^gpt-(\d+)/.exec(model)
+  if (!match) return false
+  return Number(match[1]) >= 5 && !model.startsWith("gpt-5-mini")
 }
 
 function helper(input: {
