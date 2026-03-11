@@ -6,6 +6,7 @@ import { Instance } from "../../src/project/instance"
 import { Provider } from "../../src/provider/provider"
 import { ProviderID, ModelID } from "../../src/provider/schema"
 import { Env } from "../../src/env"
+import { Auth } from "../../src/auth"
 
 test("provider loaded from env variable", async () => {
   await using tmp = await tmpdir({
@@ -2218,6 +2219,31 @@ test("Google Vertex: supports OpenAI compatible models", async () => {
 
       expect(model).toBeDefined()
       expect(model.api.npm).toBe("@ai-sdk/openai-compatible")
+    },
+  })
+})
+
+test("GitHub Copilot uses GitHub Copilot SDK for built-in models", async () => {
+  await using tmp = await tmpdir({
+    config: {},
+  })
+
+  await Instance.provide({
+    directory: tmp.path,
+    init: async () => {
+      await Auth.set("github-copilot", {
+        type: "oauth",
+        access: "test-access-token",
+        refresh: "test-refresh-token",
+        expires: Date.now() + 60_000,
+      })
+    },
+    fn: async () => {
+      const providers = await Provider.list()
+      const model = providers["github-copilot"]?.models["gpt-5.4"]
+
+      expect(model).toBeDefined()
+      expect(model?.api.npm).toBe("@ai-sdk/github-copilot")
     },
   })
 })

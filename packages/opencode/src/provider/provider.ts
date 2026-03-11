@@ -61,6 +61,23 @@ export namespace Provider {
     return isGpt5OrLater(modelID) && !modelID.startsWith("gpt-5-mini")
   }
 
+  function defaultProviderNpm(providerID: string) {
+    if (providerID.startsWith("github-copilot")) {
+      return "@ai-sdk/github-copilot"
+    }
+    return "@ai-sdk/openai-compatible"
+  }
+
+  function resolveProviderNpm(provider: ModelsDev.Provider, model: ModelsDev.Model) {
+    if (model.provider?.npm) {
+      return model.provider.npm
+    }
+    if (provider.id.startsWith("github-copilot")) {
+      return "@ai-sdk/github-copilot"
+    }
+    return provider.npm ?? defaultProviderNpm(provider.id)
+  }
+
   function googleVertexVars(options: Record<string, any>) {
     const project =
       options["project"] ?? Env.get("GOOGLE_CLOUD_PROJECT") ?? Env.get("GCP_PROJECT") ?? Env.get("GCLOUD_PROJECT")
@@ -708,7 +725,7 @@ export namespace Provider {
       api: {
         id: model.id,
         url: model.provider?.api ?? provider.api!,
-        npm: model.provider?.npm ?? provider.npm ?? "@ai-sdk/openai-compatible",
+        npm: resolveProviderNpm(provider, model),
       },
       status: model.status ?? "active",
       headers: model.headers ?? {},
