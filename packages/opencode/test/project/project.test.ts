@@ -291,10 +291,13 @@ describe("Project.update", () => {
       icon: { override: "data:image/png;base64,AAAA" },
     })
 
-    expect(updated.icon?.override).toBe("data:image/png;base64,AAAA")
+    expect(updated.icon?.override).toBeUndefined()
+    expect(updated.icon?.url).toContain(`/project/${project.id}/icon`)
+    expect(await Project.iconPath(project.id)).toBeDefined()
 
     const fromDb = Project.get(project.id)
-    expect(fromDb?.icon?.override).toBe("data:image/png;base64,AAAA")
+    expect(fromDb?.icon?.override).toBeUndefined()
+    expect(fromDb?.icon?.url).toContain(`/project/${project.id}/icon`)
   })
 
   test("should update commands", async () => {
@@ -357,8 +360,8 @@ describe("Project.update", () => {
     })
 
     expect(updated.name).toBe("Multi Update")
-    expect(updated.icon?.url).toBe("https://example.com/favicon.ico")
-    expect(updated.icon?.override).toBe("data:image/png;base64,BBBB")
+    expect(updated.icon?.url).toContain(`/project/${project.id}/icon`)
+    expect(updated.icon?.override).toBeUndefined()
     expect(updated.icon?.color).toBe("#00ff00")
     expect(updated.commands?.start).toBe("make start")
   })
