@@ -26,7 +26,7 @@ export function DialogEditProject(props: { project: LocalProject }) {
   const [store, setStore] = createStore({
     name: defaultName(),
     color: props.project.icon?.color || "pink",
-    iconUrl: props.project.icon?.override || "",
+    iconUrl: props.project.icon?.override || props.project.icon?.url || "",
     startup: props.project.commands?.start ?? "",
     saving: false,
     dragOver: false,

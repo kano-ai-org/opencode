@@ -9,6 +9,7 @@ import { lazy } from "../../util/lazy"
 import { InstanceBootstrap } from "../../project/bootstrap"
 
 import { existsSync } from "node:fs"
+import { readFile } from "node:fs/promises"
 
 export const ProjectRoutes = lazy(() =>
   new Hono()
@@ -120,6 +121,36 @@ export const ProjectRoutes = lazy(() =>
         const body = c.req.valid("json")
         const project = await Project.update({ ...body, projectID })
         return c.json(project)
+      },
+    )
+    .get(
+      "/:projectID/icon",
+      describeRoute({
+        summary: "Get persisted project icon",
+        description: "Return the uploaded project icon asset for a project.",
+        operationId: "project.icon",
+        responses: {
+          200: {
+            description: "Project icon bytes",
+          },
+          ...errors(404),
+        },
+      }),
+      validator("param", z.object({ projectID: z.string() })),
+      async (c) => {
+        const projectID = c.req.valid("param").projectID
+        const iconPath = await Project.iconPath(projectID)
+        if (!iconPath || !existsSync(iconPath)) {
+          return c.notFound()
+        }
+        const file = Bun.file(iconPath)
+        const content = await readFile(iconPath)
+        return new Response(content, {
+          headers: {
+            "content-type": file.type || "application/octet-stream",
+            "cache-control": "public, max-age=31536000, immutable",
+          },
+        })
       },
     )
     .delete(

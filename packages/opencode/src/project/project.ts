@@ -11,7 +11,9 @@ import { fn } from "@opencode-ai/util/fn"
 import { BusEvent } from "@/bus/bus-event"
 import { iife } from "@/util/iife"
 import { GlobalBus } from "@/bus/global"
+import { Global } from "../global"
 import { existsSync } from "fs"
+import { mkdir, readdir, rm, writeFile } from "fs/promises"
 
 import { realpath } from "fs/promises"
 import { git } from "../util/git"
@@ -19,6 +21,7 @@ import { which } from "../util/which"
 
 export namespace Project {
   const log = Log.create({ service: "project" })
+  const ICON_DIR = path.join(Global.Path.data, "project-icons")
 
   export const Info = z
     .object({
@@ -70,6 +73,66 @@ export namespace Project {
   })
 
   type Row = typeof ProjectTable.$inferSelect
+
+  function projectIconRoute(projectID: string, updatedAt?: number) {
+    const suffix = updatedAt ? `?v=${updatedAt}` : ""
+    return `/project/${encodeURIComponent(projectID)}/icon${suffix}`
+  }
+
+  function parseImageDataUrl(value: string) {
+    const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s.exec(value)
+    if (!match) return
+    const mime = match[1]
+    const base64 = match[2]
+    const ext = mime.split("/")[1]?.replace("svg+xml", "svg") || "png"
+    return { mime, base64, ext }
+  }
+
+  async function removePersistedProjectIcons(projectID: string) {
+    const prefix = `${projectID}.`
+    const entries = await readdir(ICON_DIR).catch(() => [])
+    await Promise.all(
+      entries
+        .filter((entry) => entry.startsWith(prefix))
+        .map((entry) => rm(path.join(ICON_DIR, entry), { force: true })),
+    )
+  }
+
+  async function persistProjectIcon(projectID: string, dataUrl: string) {
+    const parsed = parseImageDataUrl(dataUrl)
+    if (!parsed) return
+
+    await mkdir(ICON_DIR, { recursive: true })
+    await removePersistedProjectIcons(projectID)
+
+    const filename = `${projectID}.${parsed.ext}`
+    const filepath = path.join(ICON_DIR, filename)
+    await writeFile(filepath, Buffer.from(parsed.base64, "base64"))
+    return projectIconRoute(projectID, Date.now())
+  }
+
+  async function resolveStoredIcon(input: { projectID: string; icon?: Info["icon"] }) {
+    if (!input.icon) return input.icon
+    if (input.icon.override === undefined) return input.icon
+    if (!input.icon.override) {
+      await removePersistedProjectIcons(input.projectID).catch(() => undefined)
+      return { ...input.icon, override: undefined }
+    }
+    const persisted = await persistProjectIcon(input.projectID, input.icon.override)
+    if (!persisted) return input.icon
+    return {
+      ...input.icon,
+      url: persisted,
+      override: undefined,
+    }
+  }
+
+  export async function iconPath(projectID: string) {
+    const entries = await readdir(ICON_DIR).catch(() => [])
+    const match = entries.find((entry) => entry.startsWith(`${projectID}.`))
+    if (!match) return
+    return path.join(ICON_DIR, match)
+  }
 
   const pathkey = (directory: string) => {
     const normalized = directory.replace(/\\/g, "/").replace(/\/+$/, "")
@@ -449,14 +512,15 @@ export namespace Project {
       commands: Info.shape.commands.optional(),
     }),
     async (input) => {
+      const icon = await resolveStoredIcon({ projectID: input.projectID, icon: input.icon })
       const result = Database.use((db) =>
         db
         .update(ProjectTable)
         .set({
           name: input.name,
-          icon_url: input.icon?.url,
-          icon_override: input.icon?.override,
-          icon_color: input.icon?.color,
+          icon_url: icon?.url,
+          icon_override: icon?.override,
+          icon_color: icon?.color,
           commands: input.commands,
           time_updated: Date.now(),
           })

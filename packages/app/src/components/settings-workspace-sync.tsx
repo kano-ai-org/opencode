@@ -44,11 +44,11 @@ const time = (value?: number) => {
   return new Date(value).toLocaleString()
 }
 
-const WorkspaceIcon = (props: { icon?: { override?: string; color?: string }; title: string }) => (
+const WorkspaceIcon = (props: { icon?: { url?: string; override?: string; color?: string }; title: string }) => (
   <div class="size-5 rounded-[6px] overflow-hidden bg-surface-weak flex items-center justify-center shrink-0">
     <Avatar
       fallback={props.title}
-      src={props.icon?.override}
+      src={props.icon?.override ?? props.icon?.url}
       style={{ background: props.icon?.color }}
       class="size-full rounded-[6px]"
     />
