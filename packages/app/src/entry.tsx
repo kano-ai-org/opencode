@@ -11,6 +11,7 @@ import pkg from "../package.json"
 import { ServerConnection } from "./context/server"
 
 const DEFAULT_SERVER_URL_KEY = "opencode.settings.dat:defaultServerUrl"
+const DEV_NONCE_KEY = "opencode.dev.uiNonce"
 
 const getLocale = () => {
   if (typeof navigator !== "object") return "en" as const
@@ -45,6 +46,31 @@ const setStorage = (key: string, value: string | null) => {
       return
     }
     localStorage.removeItem(key)
+  } catch {
+    return
+  }
+}
+
+const clearDevPersistedState = (nonce: string | undefined) => {
+  if (typeof localStorage === "undefined") return
+  if (!nonce) return
+
+  try {
+    const previous = localStorage.getItem(DEV_NONCE_KEY)
+    if (previous === nonce) return
+
+    const keysToRemove: string[] = []
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index)
+      if (!key) continue
+      if (key.startsWith("opencode.")) keysToRemove.push(key)
+    }
+    keysToRemove.push(DEFAULT_SERVER_URL_KEY)
+
+    for (const key of keysToRemove) {
+      localStorage.removeItem(key)
+    }
+    localStorage.setItem(DEV_NONCE_KEY, nonce)
   } catch {
     return
   }
@@ -118,6 +144,8 @@ const defaultUrl = iife(() => {
     return `http://${import.meta.env.VITE_OPENCODE_SERVER_HOST ?? "localhost"}:${import.meta.env.VITE_OPENCODE_SERVER_PORT ?? "4096"}`
   return location.origin
 })
+
+clearDevPersistedState(import.meta.env.VITE_OPENCODE_DEV_NONCE)
 
 if (root instanceof HTMLElement) {
   const server: ServerConnection.Http = { type: "http", http: { url: defaultUrl } }

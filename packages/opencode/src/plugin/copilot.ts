@@ -4,6 +4,7 @@ import { iife } from "@/util/iife"
 import { setTimeout as sleep } from "node:timers/promises"
 
 const CLIENT_ID = "Ov23li8tweQw6odWQebz"
+const OMO_INTERNAL_INITIATOR_MARKER = "<!-- OMO_INTERNAL_INITIATOR -->"
 // Add a small safety buffer when polling to avoid hitting the server
 // slightly too early due to clock skew / timer drift.
 const OAUTH_POLLING_SAFETY_MARGIN_MS = 3000 // 3 seconds
@@ -16,6 +17,35 @@ function getUrls(domain: string) {
     DEVICE_CODE_URL: `https://${domain}/login/device/code`,
     ACCESS_TOKEN_URL: `https://${domain}/login/oauth/access_token`,
   }
+}
+
+function contentHasInternalInitiatorMarker(content: unknown): boolean {
+  if (typeof content === "string") {
+    return content.includes(OMO_INTERNAL_INITIATOR_MARKER)
+  }
+
+  if (!Array.isArray(content)) {
+    return false
+  }
+
+  return content.some((part: any) => {
+    if (typeof part?.text === "string" && part.text.includes(OMO_INTERNAL_INITIATOR_MARKER)) {
+      return true
+    }
+    if (typeof part?.content === "string" && part.content.includes(OMO_INTERNAL_INITIATOR_MARKER)) {
+      return true
+    }
+    if (Array.isArray(part?.content)) {
+      return contentHasInternalInitiatorMarker(part.content)
+    }
+    return false
+  })
+}
+
+export function isCopilotAgentInitiatedMessage(last: { role?: string; content?: unknown } | undefined): boolean {
+  if (!last) return false
+  if (last.role !== "user") return true
+  return contentHasInternalInitiatorMarker(last.content)
 }
 
 export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
@@ -78,7 +108,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
                       (msg: any) =>
                         Array.isArray(msg.content) && msg.content.some((part: any) => part.type === "image_url"),
                     ),
-                    isAgent: last?.role !== "user",
+                    isAgent: isCopilotAgentInitiatedMessage(last),
                   }
                 }
 
@@ -90,7 +120,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
                       (item: any) =>
                         Array.isArray(item?.content) && item.content.some((part: any) => part.type === "input_image"),
                     ),
-                    isAgent: last?.role !== "user",
+                    isAgent: isCopilotAgentInitiatedMessage(last),
                   }
                 }
 
@@ -112,7 +142,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
                               part.content.some((nested: any) => nested?.type === "image")),
                         ),
                     ),
-                    isAgent: !(last?.role === "user" && hasNonToolCalls),
+                    isAgent: isCopilotAgentInitiatedMessage(last) || !(last?.role === "user" && hasNonToolCalls),
                   }
                 }
               } catch {}

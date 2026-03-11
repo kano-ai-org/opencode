@@ -61,6 +61,39 @@ const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested struc
 
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
+  type PromptModelRef = {
+    providerID: string
+    modelID: string
+  }
+
+  function sanitizePromptModel(model: PromptModelRef | undefined, source: string): PromptModelRef | undefined {
+    if (!model) return model
+
+    const providerID = model.providerID.trim().toLowerCase()
+    const modelID = model.modelID.trim().toLowerCase()
+    if (providerID !== "github-copilot") return model
+    if (
+      modelID !== "gpt-5.4" &&
+      modelID !== "gpt-5-4" &&
+      !modelID.startsWith("gpt-5.4-") &&
+      !modelID.startsWith("gpt-5-4-")
+    ) {
+      return model
+    }
+
+    const sanitized = {
+      providerID: model.providerID,
+      modelID: "gpt-5-mini",
+    }
+
+    log.info("sanitized unsupported copilot model", {
+      source,
+      from: `${model.providerID}/${model.modelID}`,
+      to: `${sanitized.providerID}/${sanitized.modelID}`,
+    })
+
+    return sanitized
+  }
 
   const state = Instance.state(
     () => {
@@ -324,16 +357,18 @@ export namespace SessionPrompt {
         break
       }
 
+      const currentUserModel = sanitizePromptModel(lastUser.model, "loop:lastUser") ?? lastUser.model
+
       step++
       if (step === 1)
         ensureTitle({
           session,
-          modelID: lastUser.model.modelID,
-          providerID: lastUser.model.providerID,
+          modelID: currentUserModel.modelID,
+          providerID: currentUserModel.providerID,
           history: msgs,
         })
 
-      const model = await Provider.getModel(lastUser.model.providerID, lastUser.model.modelID).catch((e) => {
+      const model = await Provider.getModel(currentUserModel.providerID, currentUserModel.modelID).catch((e) => {
         if (Provider.ModelNotFoundError.isInstance(e)) {
           const hint = e.data.suggestions?.length ? ` Did you mean: ${e.data.suggestions.join(", ")}?` : ""
           Bus.publish(Session.Event.Error, {
@@ -509,7 +544,7 @@ export namespace SessionPrompt {
               created: Date.now(),
             },
             agent: lastUser.agent,
-            model: lastUser.model,
+            model: currentUserModel,
           }
           await Session.updateMessage(summaryUserMsg)
           await Session.updatePart({
@@ -548,7 +583,7 @@ export namespace SessionPrompt {
         await SessionCompaction.create({
           sessionID,
           agent: lastUser.agent,
-          model: lastUser.model,
+          model: currentUserModel,
           auto: true,
         })
         continue
@@ -706,7 +741,7 @@ export namespace SessionPrompt {
         await SessionCompaction.create({
           sessionID,
           agent: lastUser.agent,
-          model: lastUser.model,
+          model: currentUserModel,
           auto: true,
           overflow: !processor.message.finish,
         })
@@ -727,9 +762,12 @@ export namespace SessionPrompt {
 
   async function lastModel(sessionID: string) {
     for await (const item of MessageV2.stream(sessionID)) {
-      if (item.info.role === "user" && item.info.model) return item.info.model
+      if (item.info.role === "user" && item.info.model) {
+        return sanitizePromptModel(item.info.model, "lastModel") ?? item.info.model
+      }
     }
-    return Provider.defaultModel()
+    const model = await Provider.defaultModel()
+    return sanitizePromptModel(model, "defaultModel") ?? model
   }
 
   /** @internal Exported for testing */
@@ -956,7 +994,8 @@ export namespace SessionPrompt {
   async function createUserMessage(input: PromptInput) {
     const agent = await Agent.get(input.agent ?? (await Agent.defaultAgent()))
 
-    const model = input.model ?? agent.model ?? (await lastModel(input.sessionID))
+    const resolvedModel = input.model ?? agent.model ?? (await lastModel(input.sessionID))
+    const model = sanitizePromptModel(resolvedModel, "createUserMessage") ?? resolvedModel
     const full =
       !input.variant && agent.variant
         ? await Provider.getModel(model.providerID, model.modelID).catch(() => undefined)
@@ -1496,7 +1535,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       await SessionRevert.cleanup(session)
     }
     const agent = await Agent.get(input.agent)
-    const model = input.model ?? agent.model ?? (await lastModel(input.sessionID))
+    const resolvedModel = input.model ?? agent.model ?? (await lastModel(input.sessionID))
+    const model = sanitizePromptModel(resolvedModel, "shell") ?? resolvedModel
     const userMsg: MessageV2.User = {
       id: Identifier.ascending("message"),
       sessionID: input.sessionID,
@@ -1793,7 +1833,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     }
     template = template.trim()
 
-    const taskModel = await (async () => {
+    const resolvedTaskModel = await (async () => {
       if (command.model) {
         return Provider.parseModel(command.model)
       }
@@ -1806,6 +1846,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       if (input.model) return Provider.parseModel(input.model)
       return await lastModel(input.sessionID)
     })()
+    const taskModel = sanitizePromptModel(resolvedTaskModel, "command:taskModel") ?? resolvedTaskModel
 
     try {
       await Provider.getModel(taskModel.providerID, taskModel.modelID)
@@ -1852,11 +1893,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       : [...templateParts, ...(input.parts ?? [])]
 
     const userAgent = isSubtask ? (input.agent ?? (await Agent.defaultAgent())) : agentName
-    const userModel = isSubtask
+    const resolvedUserModel = isSubtask
       ? input.model
         ? Provider.parseModel(input.model)
         : await lastModel(input.sessionID)
       : taskModel
+    const userModel = sanitizePromptModel(resolvedUserModel, "command:userModel") ?? resolvedUserModel
 
     await Plugin.trigger(
       "command.execute.before",

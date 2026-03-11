@@ -991,8 +991,8 @@ export namespace Provider {
         continue
       }
       const result = await fn(data)
-      if (result && (result.autoload || providers[providerID])) {
-        if (result.getModel) modelLoaders[providerID] = result.getModel
+      if (result?.getModel) modelLoaders[providerID] = result.getModel
+      if (result && (result.autoload || providers[providerID] || config.provider?.[providerID])) {
         const opts = result.options ?? {}
         const patch: Partial<Info> = providers[providerID] ? { options: opts } : { source: "custom", options: opts }
         mergeProvider(providerID, patch)

@@ -209,3 +209,29 @@ describe("session.prompt agent variant", () => {
     }
   })
 })
+
+describe("session.prompt copilot model sanitization", () => {
+  test("rewrites github-copilot gpt-5.4 prompts to gpt-5-mini", async () => {
+    await using tmp = await tmpdir({ git: true })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+
+        const result = await SessionPrompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          model: { providerID: "github-copilot", modelID: "gpt-5.4" },
+          noReply: true,
+          parts: [{ type: "text", text: "hello" }],
+        })
+
+        if (result.info.role !== "user") throw new Error("expected user message")
+        expect(result.info.model).toEqual({ providerID: "github-copilot", modelID: "gpt-5-mini" })
+
+        await Session.remove(session.id)
+      },
+    })
+  })
+})

@@ -443,6 +443,216 @@ describe("session.llm.stream", () => {
     })
   })
 
+  test("sends responses API payload for GitHub Copilot gpt-5.4", async () => {
+    const server = state.server
+    if (!server) {
+      throw new Error("Server not initialized")
+    }
+
+    const source = await loadFixture("github-copilot", "gpt-5.4")
+    const model = source.model
+
+    const responseChunks = [
+      {
+        type: "response.created",
+        response: {
+          id: "resp-2",
+          created_at: Math.floor(Date.now() / 1000),
+          model: model.id,
+          service_tier: null,
+        },
+      },
+      {
+        type: "response.output_text.delta",
+        item_id: "item-2",
+        delta: "Hello",
+        logprobs: null,
+      },
+      {
+        type: "response.completed",
+        response: {
+          incomplete_details: null,
+          usage: {
+            input_tokens: 1,
+            input_tokens_details: null,
+            output_tokens: 1,
+            output_tokens_details: null,
+          },
+          service_tier: null,
+        },
+      },
+    ]
+    const request = waitRequest("/responses", createEventResponse(responseChunks, true))
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            enabled_providers: ["github-copilot"],
+            provider: {
+              "github-copilot": {
+                name: "GitHub Copilot",
+                env: ["GITHUB_TOKEN"],
+                npm: "@ai-sdk/github-copilot",
+                api: "https://api.githubcopilot.com/v1",
+                models: {
+                  [model.id]: model,
+                },
+                options: {
+                  apiKey: "test-copilot-key",
+                  baseURL: `${server.url.origin}/v1`,
+                },
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const resolved = await Provider.getModel("github-copilot", model.id)
+        const language = await Provider.getLanguage(resolved)
+        const sessionID = "session-test-3"
+        const agent = {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          temperature: 0.2,
+        } satisfies Agent.Info
+
+        const user = {
+          id: "user-3",
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: agent.name,
+          model: { providerID: "github-copilot", modelID: resolved.id },
+          variant: "high",
+        } satisfies MessageV2.User
+
+        const stream = await LLM.stream({
+          user,
+          sessionID,
+          model: resolved,
+          agent,
+          system: ["You are a helpful assistant."],
+          abort: new AbortController().signal,
+          messages: [{ role: "user", content: "Hello" }],
+          tools: {},
+        })
+
+        for await (const _ of stream.fullStream) {
+        }
+
+        const capture = await request
+        const body = capture.body
+
+        expect(resolved.api.id).toBe("gpt-5.4")
+        expect(resolved.api.npm).toBe("@ai-sdk/github-copilot")
+        expect(language.provider).toBe("github-copilot.responses")
+        expect(capture.url.pathname).toBe("/v1/responses")
+        expect(body.model).toBe(resolved.api.id)
+        expect(body.stream).toBe(true)
+      },
+    })
+  })
+
+  test("keeps GitHub Copilot gpt-5-mini on chat completions", async () => {
+    const server = state.server
+    if (!server) {
+      throw new Error("Server not initialized")
+    }
+
+    const source = await loadFixture("github-copilot", "gpt-5-mini")
+    const model = source.model
+
+    const request = waitRequest(
+      "/chat/completions",
+      new Response(createChatStream("Hello"), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    )
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            enabled_providers: ["github-copilot"],
+            provider: {
+              "github-copilot": {
+                name: "GitHub Copilot",
+                env: ["GITHUB_TOKEN"],
+                npm: "@ai-sdk/github-copilot",
+                api: "https://api.githubcopilot.com/v1",
+                models: {
+                  [model.id]: model,
+                },
+                options: {
+                  apiKey: "test-copilot-key",
+                  baseURL: `${server.url.origin}/v1`,
+                },
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const resolved = await Provider.getModel("github-copilot", model.id)
+        const sessionID = "session-test-4"
+        const agent = {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          temperature: 0.2,
+        } satisfies Agent.Info
+
+        const user = {
+          id: "user-4",
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: agent.name,
+          model: { providerID: "github-copilot", modelID: resolved.id },
+          variant: "high",
+        } satisfies MessageV2.User
+
+        const stream = await LLM.stream({
+          user,
+          sessionID,
+          model: resolved,
+          agent,
+          system: ["You are a helpful assistant."],
+          abort: new AbortController().signal,
+          messages: [{ role: "user", content: "Hello" }],
+          tools: {},
+        })
+
+        for await (const _ of stream.fullStream) {
+        }
+
+        const capture = await request
+        const body = capture.body
+
+        expect(capture.url.pathname).toBe("/v1/chat/completions")
+        expect(body.model).toBe(resolved.api.id)
+        expect(body.stream).toBe(true)
+      },
+    })
+  })
+
   test("sends messages API payload for Anthropic models", async () => {
     const server = state.server
     if (!server) {
