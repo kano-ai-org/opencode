@@ -2,8 +2,10 @@ import { Component } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { Button } from "@opencode-ai/ui/button"
+import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { Icon } from "@opencode-ai/ui/icon"
+import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { SettingsGeneral } from "./settings-general"
@@ -17,6 +19,7 @@ import { SettingsWorkspaceSync } from "./settings-workspace-sync"
 export const DialogSettings: Component = () => {
   const language = useLanguage()
   const platform = usePlatform()
+  const dialog = useDialog()
   const [view, setView] = createStore({
     zoom: 1 as 0 | 1 | 2,
   })
@@ -35,31 +38,54 @@ export const DialogSettings: Component = () => {
   const zoomReset = () => setView("zoom", 1)
 
   return (
-    <Dialog size="x-large" transition containerClass={`settings-dialog-shell ${zoomClass()}`}>
-      <Tabs orientation="vertical" variant="settings" defaultValue="general" class="h-full settings-dialog relative">
-        <div class="settings-dialog-zoom-controls">
-          <Button
-            variant="secondary"
+    <Dialog
+      size="x-large"
+      transition
+      title={language.t("command.category.settings")}
+      action={
+        <div class="settings-dialog-actions">
+          <div class="settings-dialog-zoom-controls">
+            <IconButton
+              data-action="settings-size-down"
+              variant="ghost"
+              size="small"
+              icon="dash"
+              aria-label="Zoom out settings"
+              onClick={zoomOut}
+              disabled={view.zoom === 0}
+            />
+            <Button
+              data-action="settings-size-reset"
+              variant="secondary"
+              size="small"
+              aria-label="Reset settings size"
+              onClick={zoomReset}
+            >
+              100%
+            </Button>
+            <IconButton
+              data-action="settings-size-up"
+              variant="ghost"
+              size="small"
+              icon="expand"
+              aria-label="Zoom in settings"
+              onClick={zoomIn}
+              disabled={view.zoom === 2}
+            />
+          </div>
+          <IconButton
+            data-action="settings-close"
+            variant="ghost"
             size="small"
-            aria-label="Zoom out settings"
-            onClick={zoomOut}
-            disabled={view.zoom === 0}
-          >
-            -
-          </Button>
-          <Button variant="secondary" size="small" aria-label="Reset settings size" onClick={zoomReset}>
-            100%
-          </Button>
-          <Button
-            variant="secondary"
-            size="small"
-            aria-label="Zoom in settings"
-            onClick={zoomIn}
-            disabled={view.zoom === 2}
-          >
-            +
-          </Button>
+            icon="close"
+            aria-label={language.t("common.close")}
+            onClick={dialog.close}
+          />
         </div>
+      }
+      containerClass={`settings-dialog-shell ${zoomClass()}`}
+    >
+      <Tabs orientation="vertical" variant="settings" defaultValue="general" class="h-full settings-dialog relative">
         <Tabs.List>
           <div class="flex flex-col justify-between h-full w-full">
             <div class="flex flex-col gap-3 w-full pt-3">

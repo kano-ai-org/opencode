@@ -1,6 +1,6 @@
 @import "@opencode-ai/ui/styles/tailwind";
 
-.settings-dialog-shell {
+[data-component="dialog"][data-size="x-large"] [data-slot="dialog-container"].settings-dialog-shell {
   position: relative;
   resize: both;
   overflow: auto;
@@ -10,33 +10,35 @@
   max-height: 96vh;
 }
 
-.settings-dialog-compact {
+[data-component="dialog"][data-size="x-large"] [data-slot="dialog-container"].settings-dialog-compact {
   width: min(900px, 94vw);
   height: min(70vh, 620px);
 }
 
-.settings-dialog-normal {
+[data-component="dialog"][data-size="x-large"] [data-slot="dialog-container"].settings-dialog-normal {
   width: min(1080px, 96vw);
   height: min(84vh, 860px);
 }
 
-.settings-dialog-expanded {
+[data-component="dialog"][data-size="x-large"] [data-slot="dialog-container"].settings-dialog-expanded {
   width: min(1500px, 98vw);
   height: min(96vh, 1100px);
 }
 
+.settings-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .settings-dialog-zoom-controls {
-  position: absolute;
-  top: 10px;
-  right: 54px;
-  z-index: 20;
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
 @media (max-width: 1024px) {
-  .settings-dialog-shell {
+  [data-component="dialog"][data-size="x-large"] [data-slot="dialog-container"].settings-dialog-shell {
     width: 100vw;
     max-width: 100vw;
     height: 100vh;
@@ -46,13 +48,15 @@
     resize: none;
   }
 
-  .settings-dialog-zoom-controls {
-    top: 8px;
-    right: 52px;
-    gap: 8px;
+  .settings-dialog-actions {
+    gap: 6px;
   }
 
-  .settings-dialog-zoom-controls button {
+  .settings-dialog-zoom-controls {
+    display: none;
+  }
+
+  .settings-dialog-actions button {
     min-height: 34px;
     padding-inline: 10px;
   }
