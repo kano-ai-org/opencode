@@ -27,9 +27,9 @@ export function Dialog(props: DialogProps) {
     >
       <div
         data-slot="dialog-container"
+        class={props.containerClass}
         classList={{
           ...(props.containerClassList ?? {}),
-          [props.containerClass ?? ""]: !!props.containerClass,
         }}
       >
         <Kobalte.Content

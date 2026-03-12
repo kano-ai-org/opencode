@@ -27,6 +27,44 @@ test("smoke settings dialog opens, switches tabs, closes", async ({ page, gotoSe
   await closeDialog(page, dialog)
 })
 
+test("settings dialog zoom controls resize the panel", async ({ page, gotoSession }) => {
+  await gotoSession()
+
+  const dialog = await openSettings(page)
+  const size = () =>
+    dialog.evaluate((el) => {
+      const rect = el.getBoundingClientRect()
+      return {
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      }
+    })
+
+  const normal = await size()
+
+  await dialog.getByRole("button", { name: "Zoom in settings" }).click()
+  const expanded = await size()
+  expect(expanded.width).toBeGreaterThan(normal.width)
+  expect(expanded.height).toBeGreaterThan(normal.height)
+
+  await dialog.getByRole("button", { name: "Zoom out settings" }).click()
+  const reset = await size()
+  expect(reset.width).toBe(normal.width)
+  expect(reset.height).toBe(normal.height)
+})
+
+test("settings dialog can be closed from the header on mobile", async ({ page, gotoSession }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await gotoSession()
+
+  const dialog = await openSettings(page)
+  const close = dialog.getByRole("button", { name: "Close" })
+
+  await expect(close).toBeVisible()
+  await close.click()
+  await expect(dialog).toHaveCount(0)
+})
+
 test("changing language updates settings labels", async ({ page, gotoSession }) => {
   await page.addInitScript(() => {
     localStorage.setItem("opencode.global.dat:language", JSON.stringify({ locale: "en" }))
