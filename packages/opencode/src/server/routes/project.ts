@@ -10,7 +10,6 @@ import { lazy } from "../../util/lazy"
 import { InstanceBootstrap } from "../../project/bootstrap"
 
 import { existsSync } from "node:fs"
-import { readFile } from "node:fs/promises"
 
 export const ProjectRoutes = lazy(() =>
   new Hono()
@@ -145,8 +144,7 @@ export const ProjectRoutes = lazy(() =>
           return c.notFound()
         }
         const file = Bun.file(iconPath)
-        const content = await readFile(iconPath)
-        return new Response(content, {
+        return new Response(file, {
           headers: {
             "content-type": file.type || "application/octet-stream",
             "cache-control": "public, max-age=31536000, immutable",
