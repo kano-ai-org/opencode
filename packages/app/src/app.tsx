@@ -8,6 +8,7 @@ import { Font } from "@opencode-ai/ui/font"
 import { ThemeProvider } from "@opencode-ai/ui/theme"
 import { MetaProvider } from "@solidjs/meta"
 import { BaseRouterProps, Navigate, Route, Router } from "@solidjs/router"
+import { QueryClient, QueryClientProvider } from "@tanstack/solid-query"
 import { Component, ErrorBoundary, type JSX, lazy, type ParentProps, Show, Suspense } from "solid-js"
 import { CommandProvider } from "@/context/command"
 import { CommentsProvider } from "@/context/comments"
@@ -33,6 +34,7 @@ import { Dynamic } from "solid-js/web"
 const Home = lazy(() => import("@/pages/home"))
 const Session = lazy(() => import("@/pages/session"))
 const Loading = () => <div class="size-full" />
+const queryClient = new QueryClient()
 
 const HomeRoute = () => (
   <Suspense fallback={<Loading />}>
@@ -138,20 +140,22 @@ const resolveDefaultServerUrl = (props: {
 export function AppBaseProviders(props: ParentProps) {
   return (
     <MetaProvider>
-      <Font />
-      <ThemeProvider>
-        <LanguageProvider>
-          <UiI18nBridge>
-            <ErrorBoundary fallback={(error) => <ErrorPage error={error} />}>
-              <DialogProvider>
-                <MarkedProviderWithNativeParser>
-                  <FileComponentProvider component={File}>{props.children}</FileComponentProvider>
-                </MarkedProviderWithNativeParser>
-              </DialogProvider>
-            </ErrorBoundary>
-          </UiI18nBridge>
-        </LanguageProvider>
-      </ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <Font />
+        <ThemeProvider>
+          <LanguageProvider>
+            <UiI18nBridge>
+              <ErrorBoundary fallback={(error) => <ErrorPage error={error} />}>
+                <DialogProvider>
+                  <MarkedProviderWithNativeParser>
+                    <FileComponentProvider component={File}>{props.children}</FileComponentProvider>
+                  </MarkedProviderWithNativeParser>
+                </DialogProvider>
+              </ErrorBoundary>
+            </UiI18nBridge>
+          </LanguageProvider>
+        </ThemeProvider>
+      </QueryClientProvider>
     </MetaProvider>
   )
 }

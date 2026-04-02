@@ -166,7 +166,7 @@ export namespace Server {
               providerID: z.string(),
             }),
           ),
-          validator("json", Auth.Info),
+          validator("json", Auth.Info.zod),
           async (c) => {
             const providerID = c.req.valid("param").providerID
             const info = c.req.valid("json")
