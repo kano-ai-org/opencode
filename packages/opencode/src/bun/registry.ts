@@ -6,6 +6,10 @@ import { online } from "@/util/network"
 export namespace PackageRegistry {
   const log = Log.create({ service: "bun" })
 
+  function tryParseSemver(version: string) {
+    return semver.valid(version) ? version : semver.valid(semver.coerce(version))
+  }
+
   function which() {
     return process.execPath
   }
@@ -45,6 +49,20 @@ export namespace PackageRegistry {
     const isRange = /[\s^~*xX<>|=]/.test(cachedVersion)
     if (isRange) return !semver.satisfies(latestVersion, cachedVersion)
 
-    return semver.lt(cachedVersion, latestVersion)
+    const parsedCachedVersion = tryParseSemver(cachedVersion)
+    const parsedLatestVersion = tryParseSemver(latestVersion)
+
+    if (!parsedCachedVersion || !parsedLatestVersion) {
+      log.warn("Skipping outdated check for non-semver version", {
+        pkg,
+        cachedVersion,
+        latestVersion,
+        parsedCachedVersion,
+        parsedLatestVersion,
+      })
+      return false
+    }
+
+    return semver.lt(parsedCachedVersion, parsedLatestVersion)
   }
 }

@@ -43,6 +43,7 @@ import { QuestionRoutes } from "./routes/question"
 import { PermissionRoutes } from "./routes/permission"
 import { GlobalRoutes } from "./routes/global"
 import { MDNS } from "./mdns"
+import { Installation } from "../installation"
 
 // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -52,6 +53,11 @@ export namespace Server {
 
   let _url: URL | undefined
   let _corsWhitelist: string[] = []
+
+  function webUIOrigins() {
+    const values = ["http://127.0.0.1:4455", Flag.OPENCODE_WEB_UI_ORIGIN, "https://app.opencode.ai"]
+    return [...new Set(values.filter((value): value is string => Boolean(value)).map((value) => value.replace(/\/+$/, "")))]
+  }
 
   function allow(origin: string) {
     return _corsWhitelist.some((item) => {
@@ -572,20 +578,28 @@ export namespace Server {
         )
         .all("/*", async (c) => {
           const path = c.req.path
-          const ui = (Flag.OPENCODE_WEB_UI_ORIGIN || "https://app.opencode.ai").replace(/\/+$/, "")
-
-          const response = await proxy(`${ui}${path}`, {
-            ...c.req,
-            headers: {
-              ...c.req.raw.headers,
-              host: new URL(ui).host,
-            },
-          })
-          response.headers.set(
-            "Content-Security-Policy",
-            "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:",
-          )
-          return response
+          let lastError: unknown
+          for (const ui of webUIOrigins()) {
+            try {
+              const response = await proxy(`${ui}${path}`, {
+                ...c.req,
+                headers: {
+                  ...c.req.raw.headers,
+                  host: new URL(ui).host,
+                },
+              })
+              response.headers.set("X-OpenCode-UI-Origin", ui)
+              response.headers.set(
+                "Content-Security-Policy",
+                "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:",
+              )
+              return response
+            } catch (error) {
+              lastError = error
+              log.warn("web ui proxy failed", { ui, path, error })
+            }
+          }
+          throw lastError ?? new Error(`failed to proxy web ui for ${path}`)
         }) as unknown as Hono,
   )
 

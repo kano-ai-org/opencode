@@ -40,6 +40,9 @@ const DEFAULT_CSP =
 const csp = (hash = "") =>
   `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:`
 
+const webUIOrigins = () =>
+  [...new Set([Flag.OPENCODE_WEB_UI_ORIGIN, "https://app.opencode.ai"].filter((value): value is string => Boolean(value)).map((value) => value.replace(/\/+$/, "")))]
+
 export const InstanceRoutes = (app?: Hono) =>
   (app ?? new Hono())
     .onError(errorHandler(log))
@@ -249,9 +252,28 @@ export const InstanceRoutes = (app?: Hono) =>
       },
     )
     .all("/*", async (c) => {
-      const embeddedWebUI = await embeddedUIPromise
       const path = c.req.path
 
+      for (const ui of webUIOrigins()) {
+        try {
+          const response = await proxy(`${ui}${path}`, {
+            ...c.req,
+            headers: {
+              ...c.req.raw.headers,
+              host: new URL(ui).host,
+            },
+          })
+          response.headers.set("X-OpenCode-UI-Origin", ui)
+          if (response.headers.get("content-type")?.includes("text/html")) {
+            response.headers.set("Content-Security-Policy", DEFAULT_CSP)
+          }
+          return response
+        } catch (error) {
+          log.warn("web ui proxy failed", { ui, path, error })
+        }
+      }
+
+      const embeddedWebUI = await embeddedUIPromise
       if (embeddedWebUI) {
         const match = embeddedWebUI[path.replace(/^\//, "")] ?? embeddedWebUI["index.html"] ?? null
         if (!match) return c.json({ error: "Not Found" }, 404)
@@ -262,10 +284,11 @@ export const InstanceRoutes = (app?: Hono) =>
             c.header("Content-Security-Policy", DEFAULT_CSP)
           }
           return c.body(await file.arrayBuffer())
-        } else {
-          return c.json({ error: "Not Found" }, 404)
         }
-      } else {
+        return c.json({ error: "Not Found" }, 404)
+      }
+
+      {
         const response = await proxy(`https://app.opencode.ai${path}`, {
           ...c.req,
           headers: {

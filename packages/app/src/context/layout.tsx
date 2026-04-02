@@ -526,6 +526,9 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     let workspaceSeeded = false
     const workspacePendingSync = new Set<string>()
     const [workspacePendingTick, setWorkspacePendingTick] = createSignal(0)
+    const indexedWorkspaceRoots = () =>
+      globalSync.data.project.flatMap((project) => [project.worktree, ...(project.sandboxes ?? [])])
+    const openedWorkspaceRoots = () => server.projects.list().flatMap((project) => [project.worktree, ...(project.sandboxes ?? [])])
 
     const queueWorkspacePendingSync = (directory: string) => {
       if (workspacePendingSync.has(directory)) return
@@ -1021,17 +1024,14 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       workspaceSync: {
         localKeys: createMemo(() => Object.keys(store.sidebar.workspaces).sort((a, b) => a.localeCompare(b))),
         async refresh() {
-          const roots = new Set<string>([
-            ...globalSync.data.project.map((project) => project.worktree),
-            ...server.projects.list().map((project) => project.worktree),
-          ])
+          const roots = new Set<string>([...indexedWorkspaceRoots(), ...openedWorkspaceRoots()])
           for (const root of roots) {
             await hydrateWorkspaceToggles(root, true)
           }
         },
         async snapshot() {
-          const opened = new Set(server.projects.list().map((project) => project.worktree))
-          const indexed = new Set(globalSync.data.project.map((project) => project.worktree))
+          const opened = new Set(openedWorkspaceRoots())
+          const indexed = new Set(indexedWorkspaceRoots())
           const roots = new Set<string>([...indexed, ...opened])
 
           const rows = await Promise.all(

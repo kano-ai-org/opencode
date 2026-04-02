@@ -21,6 +21,8 @@ import { errors } from "../error"
 import { lazy } from "../../util/lazy"
 import { Bus } from "../../bus"
 import { NamedError } from "@opencode-ai/util/error"
+import { Instance } from "@/project/instance"
+import { WorkspaceContext } from "@/control-plane/workspace-context"
 
 import { SessionTransfer } from "@/session/transfer"
 
@@ -931,19 +933,23 @@ export const SessionRoutes = lazy(() =>
       ),
       validator("json", SessionPrompt.PromptInput.omit({ sessionID: true })),
       async (c) => {
-        c.status(204)
-        c.header("Content-Type", "application/json")
-        return stream(c, async () => {
-          const sessionID = c.req.valid("param").sessionID
-          const body = c.req.valid("json")
-          SessionPrompt.prompt({ ...body, sessionID }).catch((err) => {
-            log.error("prompt_async failed", { sessionID, error: err })
-            Bus.publish(Session.Event.Error, {
-              sessionID,
-              error: new NamedError.Unknown({ message: err instanceof Error ? err.message : String(err) }).toObject(),
-            })
+        const sessionID = c.req.valid("param").sessionID
+        const body = c.req.valid("json")
+        const workspaceID = WorkspaceContext.workspaceID
+        const runPrompt = Instance.bind(() =>
+          WorkspaceContext.provide({
+            workspaceID,
+            fn: () => SessionPrompt.prompt({ ...body, sessionID }),
+          }),
+        )
+        runPrompt().catch((err) => {
+          log.error("prompt_async failed", { sessionID, error: err })
+          Bus.publish(Session.Event.Error, {
+            sessionID,
+            error: new NamedError.Unknown({ message: err instanceof Error ? err.message : String(err) }).toObject(),
           })
         })
+        return c.body(null, 204)
       },
     )
     .post(

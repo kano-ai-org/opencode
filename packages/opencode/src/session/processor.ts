@@ -18,6 +18,8 @@ import { SessionStatus } from "./status"
 import { SessionSummary } from "./summary"
 import type { Provider } from "@/provider/provider"
 import { Question } from "@/question"
+import { attach, makeRuntime, memoMap } from "@/effect/run-service"
+import { ManagedRuntime } from "effect"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
@@ -516,4 +518,31 @@ export namespace SessionProcessor {
       ),
     ),
   )
+
+  const { runPromise } = makeRuntime(Service, defaultLayer)
+  let runtime: ManagedRuntime.ManagedRuntime<Service, never> | undefined
+  const getRuntime = () => (runtime ??= ManagedRuntime.make(defaultLayer, { memoMap }))
+
+  export async function create(input: Input): Promise<{
+    readonly message: MessageV2.Assistant
+    readonly partFromToolCall: (toolCallID: string) => MessageV2.ToolPart | undefined
+    readonly abort: () => Promise<void>
+    readonly process: (streamInput: LLM.StreamInput) => Promise<Result>
+  }> {
+    const handle = await runPromise((svc) => svc.create(input))
+    return {
+      get message() {
+        return handle.message
+      },
+      partFromToolCall(toolCallID) {
+        return handle.partFromToolCall(toolCallID)
+      },
+      abort() {
+        return getRuntime().runPromise(attach(handle.abort()))
+      },
+      process(streamInput) {
+        return getRuntime().runPromise(attach(handle.process(streamInput)))
+      },
+    }
+  }
 }

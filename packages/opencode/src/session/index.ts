@@ -29,6 +29,7 @@ import { PermissionNext } from "@/permission/next"
 import { Global } from "@/global"
 import type { LanguageModelV2Usage } from "@ai-sdk/provider"
 import { iife } from "@/util/iife"
+import { Effect, Layer, ServiceMap } from "effect"
 
 const pathkey = (directory: string) => {
   const normalized = directory.replace(/\\/g, "/").replace(/\/+$/, "")
@@ -878,6 +879,45 @@ export namespace Session {
       super(`Session ${sessionID} is busy`)
     }
   }
+
+  export interface Interface {
+    readonly get: (id: string) => Effect.Effect<Info>
+    readonly messages: (input: { sessionID: string; limit?: number }) => Effect.Effect<MessageV2.WithParts[]>
+    readonly updateMessage: (msg: MessageV2.Info) => Effect.Effect<MessageV2.Info>
+    readonly updatePart: (part: MessageV2.Part) => Effect.Effect<MessageV2.Part>
+    readonly updatePartDelta: (input: {
+      sessionID: string
+      messageID: string
+      partID: string
+      field: string
+      delta: string
+    }) => Effect.Effect<void>
+    readonly setSummary: (input: { sessionID: string; summary?: Info["summary"] }) => Effect.Effect<Info>
+    readonly setRevert: (input: {
+      sessionID: string
+      revert?: Info["revert"]
+      summary?: Info["summary"]
+    }) => Effect.Effect<Info>
+    readonly clearRevert: (sessionID: string) => Effect.Effect<Info>
+  }
+
+  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Session") {}
+
+  export const layer = Layer.succeed(
+    Service,
+    Service.of({
+      get: (id) => Effect.promise(() => get(id)),
+      messages: (input) => Effect.promise(() => messages(input)),
+      updateMessage: (msg) => Effect.promise(() => updateMessage(msg)),
+      updatePart: (part) => Effect.promise(() => updatePart(part)),
+      updatePartDelta: (input) => Effect.promise(() => updatePartDelta(input)),
+      setSummary: (input) => Effect.promise(() => setSummary(input)),
+      setRevert: (input) => Effect.promise(() => setRevert(input)),
+      clearRevert: (sessionID) => Effect.promise(() => clearRevert(sessionID)),
+    }),
+  )
+
+  export const defaultLayer = layer
 
   export const initialize = fn(
     z.object({

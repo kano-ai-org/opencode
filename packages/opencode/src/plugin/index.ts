@@ -11,9 +11,40 @@ import { CodexAuthPlugin } from "./codex"
 import { Session } from "../session"
 import { NamedError } from "@opencode-ai/util/error"
 import { gitlabAuthPlugin as GitlabAuthPlugin } from "@gitlab/opencode-gitlab-auth"
+import { Effect, Layer, ServiceMap } from "effect"
 
 export namespace Plugin {
   const log = Log.create({ service: "plugin" })
+  const CHAT_HOOK_TIMEOUT_MS = 5000
+  const PLUGIN_INIT_TIMEOUT_MS = 5000
+
+  async function withTimeout<T>(label: string, task: Promise<T>, timeoutMs: number): Promise<T> {
+    return Promise.race([
+      task,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs),
+      ),
+    ])
+  }
+
+  export interface Interface {
+    readonly trigger: (name: Exclude<keyof Required<Hooks>, "auth" | "event" | "tool">, input: any, output: any) => Effect.Effect<any>
+    readonly list: () => Effect.Effect<Hooks[]>
+    readonly init: () => Effect.Effect<void>
+  }
+
+  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Plugin") {}
+
+  export const layer = Layer.succeed(
+    Service,
+    Service.of({
+      trigger: (name, input, output) => Effect.promise(() => trigger(name, input, output)),
+      list: () => Effect.promise(() => list()),
+      init: () => Effect.promise(() => init()),
+    }),
+  )
+
+  export const defaultLayer = layer
 
   // opencode-copilot-auth uses the correct GitHub App client ID (Iv1.b507a08c87ecfe98)
   // which supports token exchange for gpt-5.3-codex and other advanced models
@@ -43,7 +74,11 @@ export namespace Plugin {
 
     for (const plugin of INTERNAL_PLUGINS) {
       log.info("loading internal plugin", { name: plugin.name })
-      const init = await plugin(input).catch((err) => {
+      const init = await withTimeout(
+        `internal plugin ${plugin.name ?? "anonymous"}`,
+        plugin(input),
+        PLUGIN_INIT_TIMEOUT_MS,
+      ).catch((err) => {
         log.error("failed to load internal plugin", { name: plugin.name, error: err })
       })
       if (init) hooks.push(init)
@@ -82,10 +117,15 @@ export namespace Plugin {
       await import(plugin)
         .then(async (mod) => {
           const seen = new Set<PluginInstance>()
-          for (const [_name, fn] of Object.entries<PluginInstance>(mod)) {
+          for (const [name, fn] of Object.entries<PluginInstance>(mod)) {
             if (seen.has(fn)) continue
             seen.add(fn)
-            hooks.push(await fn(input))
+            const initialized = await withTimeout(
+              `plugin ${plugin} export ${name}`,
+              fn(input),
+              PLUGIN_INIT_TIMEOUT_MS,
+            )
+            hooks.push(initialized)
           }
         })
         .catch((err) => {
@@ -110,14 +150,38 @@ export namespace Plugin {
     Input = Parameters<Required<Hooks>[Name]>[0],
     Output = Parameters<Required<Hooks>[Name]>[1],
   >(name: Name, input: Input, output: Output): Promise<Output> {
+    const shouldTimebox =
+      name === "chat.message" ||
+      name === "chat.params" ||
+      name === "chat.headers" ||
+      name === "experimental.chat.messages.transform" ||
+      name === "experimental.chat.system.transform"
+
     if (!name) return output
     for (const hook of await state().then((x) => x.hooks)) {
       const fn = hook[name]
       if (!fn) continue
-      // @ts-expect-error if you feel adventurous, please fix the typing, make sure to bump the try-counter if you
-      // give up.
-      // try-counter: 2
-      await fn(input, output)
+      try {
+        // @ts-expect-error if you feel adventurous, please fix the typing, make sure to bump the try-counter if you
+        // give up.
+        // try-counter: 2
+        const invoke = fn(input, output)
+        if (shouldTimebox) {
+          await Promise.race([
+            invoke,
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`plugin hook timed out: ${String(name)}`)), CHAT_HOOK_TIMEOUT_MS),
+            ),
+          ])
+        } else {
+          await invoke
+        }
+      } catch (error) {
+        log.error("plugin hook failed", {
+          hook: String(name),
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
     }
     return output
   }

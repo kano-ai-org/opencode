@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { setTimeout as sleep } from "node:timers/promises"
 import { Instance } from "../../src/project/instance"
 import { Server } from "../../src/server/server"
 import { Session } from "../../src/session"
@@ -60,7 +61,7 @@ describe("session messages endpoint", () => {
         fn: async () => {
           const session = await Session.create({})
           const ids = await fill(session.id, 5)
-          const app = Server.Default()
+          const app = Server.App()
 
           const a = await app.request(`/session/${session.id}/message?limit=2`)
           expect(a.status).toBe(200)
@@ -89,7 +90,7 @@ describe("session messages endpoint", () => {
         fn: async () => {
           const session = await Session.create({})
           const ids = await fill(session.id, 3)
-          const app = Server.Default()
+          const app = Server.App()
 
           const res = await app.request(`/session/${session.id}/message`)
           expect(res.status).toBe(200)
@@ -109,7 +110,7 @@ describe("session messages endpoint", () => {
         directory: tmp.path,
         fn: async () => {
           const session = await Session.create({})
-          const app = Server.Default()
+          const app = Server.App()
 
           const bad = await app.request(`/session/${session.id}/message?limit=2&before=bad`)
           expect(bad.status).toBe(400)
@@ -131,7 +132,7 @@ describe("session messages endpoint", () => {
         fn: async () => {
           const session = await Session.create({})
           await fill(session.id, 520)
-          const app = Server.Default()
+          const app = Server.App()
 
           const res = await app.request(`/session/${session.id}/message?limit=510`)
           expect(res.status).toBe(200)
@@ -146,6 +147,60 @@ describe("session messages endpoint", () => {
 })
 
 describe("session.prompt_async error handling", () => {
+  test("prompt_async persists a noReply user message", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        agent: {
+          build: {
+            model: "openai/gpt-5.2",
+          },
+        },
+      },
+    })
+
+    await withoutWatcher(() =>
+      Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const session = await Session.create({})
+          const app = Server.App()
+
+          const res = await app.request(`/session/${session.id}/prompt_async`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              agent: "build",
+              noReply: true,
+              messageID: "msg_prompt_async_persist",
+              parts: [{ type: "text", text: "persist me" }],
+            }),
+          })
+
+          expect(res.status).toBe(204)
+
+          let part: MessageV2.WithParts["parts"][number] | undefined
+          const deadline = Date.now() + 5_000
+          while (Date.now() < deadline) {
+            const messages = await Session.messages({ sessionID: session.id })
+            part = messages.find((item) => item.info.id === "msg_prompt_async_persist")?.parts[0]
+            if (part) break
+            await sleep(100)
+          }
+
+          expect(part).toMatchObject({
+            type: "text",
+            text: "persist me",
+          })
+
+          await Session.remove(session.id)
+        },
+      }),
+    )
+  })
+
   test("prompt_async route has error handler for detached prompt call", async () => {
     const src = await Bun.file(new URL("../../src/server/routes/session.ts", import.meta.url)).text()
     const start = src.indexOf('"/:sessionID/prompt_async"')
@@ -153,6 +208,7 @@ describe("session.prompt_async error handling", () => {
     expect(start).toBeGreaterThan(-1)
     expect(end).toBeGreaterThan(start)
     const route = src.slice(start, end)
+    expect(route).toContain("Instance.bind(")
     expect(route).toContain(".catch(")
     expect(route).toContain("Bus.publish(Session.Event.Error")
   })
