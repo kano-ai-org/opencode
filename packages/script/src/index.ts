@@ -10,11 +10,27 @@ if (!expectedBunVersion) {
   throw new Error("packageManager field not found in root package.json")
 }
 
-// relax version requirement
-const expectedBunVersionRange = `^${expectedBunVersion}`
+const expectedSemver = semver.parse(expectedBunVersion)
+const currentSemver = semver.parse(process.versions.bun)
 
-if (!semver.satisfies(process.versions.bun, expectedBunVersionRange)) {
-  throw new Error(`This script requires bun@${expectedBunVersionRange}, but you are using bun@${process.versions.bun}`)
+if (!expectedSemver || !currentSemver) {
+  throw new Error(`Unable to parse Bun version requirement (${expectedBunVersion}) or current Bun version (${process.versions.bun})`)
+}
+
+const sameMinorLine =
+  currentSemver.major === expectedSemver.major
+  && currentSemver.minor === expectedSemver.minor
+  && semver.lte(currentSemver, expectedSemver)
+
+// Local dev builds often lag by one Bun patch release; allow same major/minor line.
+if (!sameMinorLine && !semver.satisfies(process.versions.bun, `^${expectedBunVersion}`)) {
+  throw new Error(`This script requires bun@^${expectedBunVersion}, but you are using bun@${process.versions.bun}`)
+}
+
+if (sameMinorLine && currentSemver.patch !== expectedSemver.patch) {
+  console.warn(
+    `[warn] Using bun@${process.versions.bun} for a script pinned to bun@${expectedBunVersion}; allowing same major/minor patch drift for local builds.`,
+  )
 }
 
 const env = {

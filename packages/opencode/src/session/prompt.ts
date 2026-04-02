@@ -957,6 +957,17 @@ export namespace SessionPrompt {
 
   async function createUserMessage(input: PromptInput) {
     const agent = await Agent.get(input.agent ?? (await Agent.defaultAgent()))
+    if (!agent) {
+      const available = await Agent.list().then((agents) => agents.filter((item) => !item.hidden).map((item) => item.name))
+      const requested = input.agent ?? "default"
+      const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
+      const error = new NamedError.Unknown({ message: `Agent not found: "${requested}".${hint}` })
+      Bus.publish(Session.Event.Error, {
+        sessionID: input.sessionID,
+        error: error.toObject(),
+      })
+      throw error
+    }
 
     const model = input.model ?? agent.model ?? (await lastModel(input.sessionID))
     const full =
