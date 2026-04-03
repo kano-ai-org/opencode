@@ -45,7 +45,7 @@ function useDefaultServer(platform: ReturnType<typeof usePlatform>, language: Re
   const [defaultUrl, defaultUrlActions] = createResource(
     async () => {
       try {
-        const url = await platform.getDefaultServerUrl?.()
+        const url = await platform.getDefaultServer?.()
         if (!url) return null
         return normalizeServerUrl(url) ?? null
       } catch (err) {
@@ -56,10 +56,10 @@ function useDefaultServer(platform: ReturnType<typeof usePlatform>, language: Re
     { initialValue: null },
   )
 
-  const canDefault = createMemo(() => !!platform.getDefaultServerUrl && !!platform.setDefaultServerUrl)
+  const canDefault = createMemo(() => !!platform.getDefaultServer && !!platform.setDefaultServer)
   const setDefault = async (url: string | null) => {
     try {
-      await platform.setDefaultServerUrl?.(url)
+      await platform.setDefaultServer?.(url)
       defaultUrlActions.mutate(url)
     } catch (err) {
       showRequestError(language, err)
@@ -497,8 +497,8 @@ export function DialogSelectServer() {
 
   async function handleRemove(url: ServerConnection.Key) {
     server.remove(url)
-    if ((await platform.getDefaultServerUrl?.()) === url) {
-      platform.setDefaultServerUrl?.(null)
+    if ((await platform.getDefaultServer?.()) === url) {
+      platform.setDefaultServer?.(null)
     }
   }
 

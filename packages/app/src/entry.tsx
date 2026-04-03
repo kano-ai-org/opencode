@@ -132,8 +132,11 @@ const platform: Platform = {
   forward,
   restart,
   notify,
-  getDefaultServerUrl: async () => readDefaultServerUrl(),
-  setDefaultServerUrl: writeDefaultServerUrl,
+  getDefaultServer: async () => {
+    const url = await readDefaultServerUrl()
+    return url ? ServerConnection.Key.make(url) : null
+  },
+  setDefaultServer: writeDefaultServerUrl,
 }
 
 const defaultUrl = iife(() => {

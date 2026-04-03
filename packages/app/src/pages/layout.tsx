@@ -2004,7 +2004,6 @@ export default function Layout(props: ParentProps) {
 
   const workspaceSidebarCtx: WorkspaceSidebarContext = {
     currentDir,
-    navList: currentSessions,
     sidebarExpanded,
     sidebarHovering,
     nav: () => state.nav,
@@ -2056,7 +2055,6 @@ export default function Layout(props: ParentProps) {
     workspaceIds,
     workspaceLabel,
     sessionProps: {
-      navList: currentSessions,
       sidebarExpanded,
       sidebarHovering,
       nav: () => state.nav,
@@ -2283,7 +2281,6 @@ export default function Layout(props: ParentProps) {
                         project={project()!}
                         sortNow={sortNow}
                         mobile={panelProps.mobile}
-                        popover={popover()}
                       />
                     </div>
                   </>
@@ -2328,7 +2325,6 @@ export default function Layout(props: ParentProps) {
                                 project={project()!}
                                 sortNow={sortNow}
                                 mobile={panelProps.mobile}
-                                popover={popover()}
                               />
                             )}
                           </For>

@@ -527,8 +527,8 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     const workspacePendingSync = new Set<string>()
     const [workspacePendingTick, setWorkspacePendingTick] = createSignal(0)
     const indexedWorkspaceRoots = () =>
-      globalSync.data.project.flatMap((project) => [project.worktree, ...(project.sandboxes ?? [])])
-    const openedWorkspaceRoots = () => server.projects.list().flatMap((project) => [project.worktree, ...(project.sandboxes ?? [])])
+      globalSync.data.project.flatMap((project) => [project.worktree])
+    const openedWorkspaceRoots = () => server.projects.list().flatMap((project) => [project.worktree])
 
     const queueWorkspacePendingSync = (directory: string) => {
       if (workspacePendingSync.has(directory)) return

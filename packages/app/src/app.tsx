@@ -115,7 +115,7 @@ function RouterRoot(props: ParentProps<{ appChildren?: JSX.Element }>) {
 
 const getStoredDefaultServerUrl = (platform: ReturnType<typeof usePlatform>) => {
   if (platform.platform !== "web") return
-  const result = platform.getDefaultServerUrl?.()
+  const result = platform.getDefaultServer?.()
   if (result instanceof Promise) return
   if (!result) return
   return normalizeServerUrl(result)
