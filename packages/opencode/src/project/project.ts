@@ -3,6 +3,7 @@ import { Filesystem } from "../util/filesystem"
 import path from "path"
 import { Database, eq, and, NotFoundError } from "../storage/db"
 import { ProjectTable } from "./project.sql"
+import { ProjectID } from "./schema"
 import { SessionTable } from "../session/session.sql"
 import { Log } from "../util/log"
 import { Flag } from "@/flag/flag"
@@ -334,7 +335,7 @@ export namespace Project {
       }
     })
 
-    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, data.id)).get())
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, ProjectID.make(data.id))).get())
     const existing = await iife(async () => {
       if (row) return fromRow(row)
       const fresh: Info = {
@@ -368,7 +369,7 @@ export namespace Project {
       result.sandboxes.push(data.sandbox)
     result.sandboxes = result.sandboxes.filter((x) => existsSync(x))
     const insert = {
-      id: result.id,
+      id: ProjectID.make(result.id),
       worktree: result.worktree,
       vcs: result.vcs ?? null,
       name: result.name,
@@ -440,11 +441,11 @@ export namespace Project {
   }
 
   async function migrateFromGlobal(id: string, worktree: string) {
-    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, "global")).get())
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, ProjectID.global)).get())
     if (!row) return
 
     const sessions = Database.use((db) =>
-      db.select().from(SessionTable).where(eq(SessionTable.project_id, "global")).all(),
+      db.select().from(SessionTable).where(eq(SessionTable.project_id, ProjectID.global)).all(),
     )
     if (sessions.length === 0) return
 
@@ -455,7 +456,9 @@ export namespace Project {
       if (row.directory && row.directory !== worktree) return
 
       log.info("migrating session", { sessionID: row.id, from: "global", to: id })
-      Database.use((db) => db.update(SessionTable).set({ project_id: id }).where(eq(SessionTable.id, row.id)).run())
+      Database.use((db) =>
+        db.update(SessionTable).set({ project_id: ProjectID.make(id) }).where(eq(SessionTable.id, row.id)).run(),
+      )
     }).catch((error) => {
       log.error("failed to migrate sessions from global to project", { error, projectId: id })
     })
@@ -468,7 +471,7 @@ export namespace Project {
         .set({
           time_initialized: Date.now(),
         })
-        .where(eq(ProjectTable.id, id))
+        .where(eq(ProjectTable.id, ProjectID.make(id)))
         .run(),
     )
   }
@@ -484,7 +487,7 @@ export namespace Project {
   }
 
   export function get(id: string): Info | undefined {
-    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, ProjectID.make(id))).get())
     if (!row) return undefined
     return fromRow(row)
   }
@@ -524,7 +527,7 @@ export namespace Project {
           commands: input.commands,
           time_updated: Date.now(),
           })
-          .where(eq(ProjectTable.id, input.projectID))
+          .where(eq(ProjectTable.id, ProjectID.make(input.projectID)))
           .returning()
           .get(),
       )
@@ -545,14 +548,18 @@ export namespace Project {
       throw new Error("cannot delete global project")
     }
 
-    const removed = Database.use((db) => db.delete(ProjectTable).where(eq(ProjectTable.id, projectID)).returning().get())
+    const removed = Database.use((db) =>
+      db.delete(ProjectTable).where(eq(ProjectTable.id, ProjectID.make(projectID))).returning().get(),
+    )
     if (!removed) throw new NotFoundError({ message: `Project not found: ${projectID}` })
 
     return true
   })
 
   export function getWorkspaceToggles(projectID: string) {
-    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, projectID)).get())
+    const row = Database.use((db) =>
+      db.select().from(ProjectTable).where(eq(ProjectTable.id, ProjectID.make(projectID))).get(),
+    )
     if (!row) {
       throw new NotFoundError({ message: `Project not found: ${projectID}` })
     }
@@ -560,7 +567,9 @@ export namespace Project {
   }
 
   export const updateWorkspaceToggles = fn(WorkspaceTogglesInput, async (input) => {
-    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, input.projectID)).get())
+    const row = Database.use((db) =>
+      db.select().from(ProjectTable).where(eq(ProjectTable.id, ProjectID.make(input.projectID))).get(),
+    )
     if (!row) {
       throw new NotFoundError({ message: `Project not found: ${input.projectID}` })
     }
@@ -583,7 +592,12 @@ export namespace Project {
           workspace_toggles_version: nextVersion,
           time_updated: Date.now(),
         })
-        .where(and(eq(ProjectTable.id, input.projectID), eq(ProjectTable.workspace_toggles_version, input.version)))
+        .where(
+          and(
+            eq(ProjectTable.id, ProjectID.make(input.projectID)),
+            eq(ProjectTable.workspace_toggles_version, input.version),
+          ),
+        )
         .returning()
         .get(),
     )
@@ -603,7 +617,7 @@ export namespace Project {
   })
 
   export async function sandboxes(id: string) {
-    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, ProjectID.make(id))).get())
     if (!row) return []
     const data = fromRow(row)
     const valid: string[] = []
@@ -617,7 +631,7 @@ export namespace Project {
   }
 
   export async function addSandbox(id: string, directory: string) {
-    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, ProjectID.make(id))).get())
     if (!row) throw new Error(`Project not found: ${id}`)
     const sandboxes = [...row.sandboxes]
     if (!sandboxes.includes(directory)) sandboxes.push(directory)
@@ -625,7 +639,7 @@ export namespace Project {
       db
         .update(ProjectTable)
         .set({ sandboxes, time_updated: Date.now() })
-        .where(eq(ProjectTable.id, id))
+        .where(eq(ProjectTable.id, ProjectID.make(id)))
         .returning()
         .get(),
     )
@@ -641,14 +655,14 @@ export namespace Project {
   }
 
   export async function removeSandbox(id: string, directory: string) {
-    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get())
+    const row = Database.use((db) => db.select().from(ProjectTable).where(eq(ProjectTable.id, ProjectID.make(id))).get())
     if (!row) throw new Error(`Project not found: ${id}`)
     const sandboxes = row.sandboxes.filter((s) => s !== directory)
     const result = Database.use((db) =>
       db
         .update(ProjectTable)
         .set({ sandboxes, time_updated: Date.now() })
-        .where(eq(ProjectTable.id, id))
+        .where(eq(ProjectTable.id, ProjectID.make(id)))
         .returning()
         .get(),
     )

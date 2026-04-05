@@ -2,6 +2,7 @@ import { EOL } from "os"
 import { basename } from "path"
 import { Agent } from "../../../agent/agent"
 import { Provider } from "../../../provider/provider"
+import { ModelID, ProviderID } from "../../../provider/schema"
 import { Session } from "../../../session"
 import type { MessageV2 } from "../../../session/message-v2"
 import { MessageID, PartID } from "../../../session/schema"
@@ -70,7 +71,11 @@ export const AgentCommand = cmd({
 })
 
 async function getAvailableTools(agent: Agent.Info) {
-  const model = agent.model ?? (await Provider.defaultModel())
+  const defaultModel = await Provider.defaultModel()
+  const model = agent.model ?? {
+    providerID: ProviderID.make(defaultModel.providerID),
+    modelID: ModelID.make(defaultModel.modelID),
+  }
   return ToolRegistry.tools(model, agent)
 }
 
@@ -112,55 +117,59 @@ function parseToolParams(input?: string) {
 }
 
 async function createToolContext(agent: Agent.Info) {
-  const session = await Session.create({ title: `Debug tool run (${agent.name})` })
-  const messageID = MessageID.ascending()
-  const model = agent.model ?? (await Provider.defaultModel())
-  const now = Date.now()
-  const message: MessageV2.Assistant = {
-    id: messageID,
-    sessionID: session.id,
-    role: "assistant",
-    time: {
-      created: now,
-    },
-    parentID: messageID,
-    modelID: model.modelID,
-    providerID: model.providerID,
-    mode: "debug",
-    agent: agent.name,
-    path: {
-      cwd: Instance.directory,
-      root: Instance.worktree,
-    },
-    cost: 0,
-    tokens: {
-      input: 0,
-      output: 0,
-      reasoning: 0,
-      cache: {
-        read: 0,
-        write: 0,
-      },
-    },
-  }
-  await Session.updateMessage(message)
+   const session = await Session.create({ title: `Debug tool run (${agent.name})` })
+   const messageID = MessageID.ascending()
+   const defaultModel = await Provider.defaultModel()
+   const model = agent.model ?? {
+     providerID: ProviderID.make(defaultModel.providerID),
+     modelID: ModelID.make(defaultModel.modelID),
+   }
+   const now = Date.now()
+   const message: MessageV2.Assistant = {
+     id: messageID,
+     sessionID: session.id as any,
+     role: "assistant",
+     time: {
+       created: now,
+     },
+     parentID: messageID,
+     modelID: model.modelID,
+     providerID: model.providerID,
+     mode: "debug",
+     agent: agent.name,
+     path: {
+       cwd: Instance.directory,
+       root: Instance.worktree,
+     },
+     cost: 0,
+     tokens: {
+       input: 0,
+       output: 0,
+       reasoning: 0,
+       cache: {
+         read: 0,
+         write: 0,
+       },
+     },
+   }
+   await Session.updateMessage(message)
 
-  const ruleset = Permission.merge(agent.permission, session.permission ?? [])
+   const ruleset = Permission.merge(agent.permission, session.permission ?? [])
 
-  return {
-    sessionID: session.id,
-    messageID,
-    callID: PartID.ascending(),
-    agent: agent.name,
-    abort: new AbortController().signal,
-    messages: [],
-    metadata: () => {},
-    async ask(req: Omit<Permission.Request, "id" | "sessionID" | "tool">) {
-      for (const pattern of req.patterns) {
-        const rule = Permission.evaluate(req.permission, pattern, ruleset)
-        if (rule.action === "deny") {
-          throw new Permission.DeniedError({ ruleset })
-        }
+   return {
+     sessionID: session.id as any,
+     messageID,
+     callID: PartID.ascending(),
+     agent: agent.name,
+     abort: new AbortController().signal,
+     messages: [],
+     metadata: () => {},
+     async ask(req: Omit<Permission.Request, "id" | "sessionID" | "tool">) {
+       for (const pattern of req.patterns) {
+         const rule = Permission.evaluate(req.permission, pattern, ruleset)
+         if (rule.action === "deny") {
+           throw new Permission.DeniedError({ ruleset })
+         }
       }
     },
   }

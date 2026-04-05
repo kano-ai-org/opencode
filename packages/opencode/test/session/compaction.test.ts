@@ -436,14 +436,14 @@ describe("session.compaction.create", () => {
         const session = await Session.create({})
 
         await SessionCompaction.create({
-          sessionID: session.id,
+          sessionID: session.id as any,
           agent: "build",
           model: ref,
           auto: true,
           overflow: true,
         })
 
-        const msgs = await Session.messages({ sessionID: session.id })
+        const msgs = await Session.messages({ sessionID: session.id as any })
         expect(msgs).toHaveLength(1)
         expect(msgs[0].info.role).toBe("user")
         expect(msgs[0].parts).toHaveLength(1)
@@ -464,15 +464,15 @@ describe("session.compaction.prune", () => {
       directory: tmp.path,
       fn: async () => {
         const session = await Session.create({})
-        const a = await user(session.id, "first")
-        const b = await assistant(session.id, a.id, tmp.path)
-        await tool(session.id, b.id, "bash", "x".repeat(200_000))
-        await user(session.id, "second")
-        await user(session.id, "third")
+        const a = await user(session.id as any, "first")
+        const b = await assistant(session.id as any, a.id, tmp.path)
+        await tool(session.id as any, b.id, "bash", "x".repeat(200_000))
+        await user(session.id as any, "second")
+        await user(session.id as any, "third")
 
-        await SessionCompaction.prune({ sessionID: session.id })
+        await SessionCompaction.prune({ sessionID: session.id as any })
 
-        const msgs = await Session.messages({ sessionID: session.id })
+        const msgs = await Session.messages({ sessionID: session.id as any })
         const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
         expect(part?.type).toBe("tool")
         expect(part?.state.status).toBe("completed")
@@ -489,15 +489,15 @@ describe("session.compaction.prune", () => {
       directory: tmp.path,
       fn: async () => {
         const session = await Session.create({})
-        const a = await user(session.id, "first")
-        const b = await assistant(session.id, a.id, tmp.path)
-        await tool(session.id, b.id, "skill", "x".repeat(200_000))
-        await user(session.id, "second")
-        await user(session.id, "third")
+        const a = await user(session.id as any, "first")
+        const b = await assistant(session.id as any, a.id, tmp.path)
+        await tool(session.id as any, b.id, "skill", "x".repeat(200_000))
+        await user(session.id as any, "second")
+        await user(session.id as any, "third")
 
-        await SessionCompaction.prune({ sessionID: session.id })
+        await SessionCompaction.prune({ sessionID: session.id as any })
 
-        const msgs = await Session.messages({ sessionID: session.id })
+        const msgs = await Session.messages({ sessionID: session.id as any })
         const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
         expect(part?.type).toBe("tool")
         if (part?.type === "tool" && part.state.status === "completed") {
@@ -515,18 +515,18 @@ describe("session.compaction.process", () => {
       directory: tmp.path,
       fn: async () => {
         const session = await Session.create({})
-        const msg = await user(session.id, "hello")
-        const reply = await assistant(session.id, msg.id, tmp.path)
+        const msg = await user(session.id as any, "hello")
+        const reply = await assistant(session.id as any, msg.id, tmp.path)
         const rt = runtime("continue")
         try {
-          const msgs = await Session.messages({ sessionID: session.id })
+          const msgs = await Session.messages({ sessionID: session.id as any })
           await expect(
             rt.runPromise(
               SessionCompaction.Service.use((svc) =>
                 svc.process({
                   parentID: reply.id,
                   messages: msgs,
-                  sessionID: session.id,
+                  sessionID: session.id as any,
                   auto: false,
                 }),
               ),
@@ -547,8 +547,8 @@ describe("session.compaction.process", () => {
         spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
 
         const session = await Session.create({})
-        const msg = await user(session.id, "hello")
-        const msgs = await Session.messages({ sessionID: session.id })
+        const msg = await user(session.id as any, "hello")
+        const msgs = await Session.messages({ sessionID: session.id as any })
         const done = defer()
         let seen = false
         const rt = runtime("continue")
@@ -569,7 +569,7 @@ describe("session.compaction.process", () => {
               svc.process({
                 parentID: msg.id,
                 messages: msgs,
-                sessionID: session.id,
+                sessionID: session.id as any,
                 auto: false,
               }),
             ),
@@ -599,22 +599,22 @@ describe("session.compaction.process", () => {
         spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
 
         const session = await Session.create({})
-        const msg = await user(session.id, "hello")
+        const msg = await user(session.id as any, "hello")
         const rt = runtime("compact")
         try {
-          const msgs = await Session.messages({ sessionID: session.id })
+          const msgs = await Session.messages({ sessionID: session.id as any })
           const result = await rt.runPromise(
             SessionCompaction.Service.use((svc) =>
               svc.process({
                 parentID: msg.id,
                 messages: msgs,
-                sessionID: session.id,
+                sessionID: session.id as any,
                 auto: false,
               }),
             ),
           )
 
-          const summary = (await Session.messages({ sessionID: session.id })).find(
+          const summary = (await Session.messages({ sessionID: session.id as any })).find(
             (msg) => msg.info.role === "assistant" && msg.info.summary,
           )
 
@@ -639,22 +639,22 @@ describe("session.compaction.process", () => {
         spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
 
         const session = await Session.create({})
-        const msg = await user(session.id, "hello")
+        const msg = await user(session.id as any, "hello")
         const rt = runtime("continue")
         try {
-          const msgs = await Session.messages({ sessionID: session.id })
+          const msgs = await Session.messages({ sessionID: session.id as any })
           const result = await rt.runPromise(
             SessionCompaction.Service.use((svc) =>
               svc.process({
                 parentID: msg.id,
                 messages: msgs,
-                sessionID: session.id,
+                sessionID: session.id as any,
                 auto: true,
               }),
             ),
           )
 
-          const all = await Session.messages({ sessionID: session.id })
+          const all = await Session.messages({ sessionID: session.id as any })
           const last = all.at(-1)
 
           expect(result).toBe("continue")
@@ -681,34 +681,34 @@ describe("session.compaction.process", () => {
         spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
 
         const session = await Session.create({})
-        await user(session.id, "root")
-        const replay = await user(session.id, "image")
+        await user(session.id as any, "root")
+        const replay = await user(session.id as any, "image")
         await Session.updatePart({
           id: PartID.ascending(),
           messageID: replay.id,
-          sessionID: session.id,
+          sessionID: session.id as any,
           type: "file",
           mime: "image/png",
           filename: "cat.png",
           url: "https://example.com/cat.png",
         })
-        const msg = await user(session.id, "current")
+        const msg = await user(session.id as any, "current")
         const rt = runtime("continue")
         try {
-          const msgs = await Session.messages({ sessionID: session.id })
+          const msgs = await Session.messages({ sessionID: session.id as any })
           const result = await rt.runPromise(
             SessionCompaction.Service.use((svc) =>
               svc.process({
                 parentID: msg.id,
                 messages: msgs,
-                sessionID: session.id,
+                sessionID: session.id as any,
                 auto: true,
                 overflow: true,
               }),
             ),
           )
 
-          const last = (await Session.messages({ sessionID: session.id })).at(-1)
+          const last = (await Session.messages({ sessionID: session.id as any })).at(-1)
 
           expect(result).toBe("continue")
           expect(last?.info.role).toBe("user")
@@ -731,25 +731,25 @@ describe("session.compaction.process", () => {
         spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
 
         const session = await Session.create({})
-        await user(session.id, "earlier")
-        const msg = await user(session.id, "current")
+        await user(session.id as any, "earlier")
+        const msg = await user(session.id as any, "current")
 
         const rt = runtime("continue")
         try {
-          const msgs = await Session.messages({ sessionID: session.id })
+          const msgs = await Session.messages({ sessionID: session.id as any })
           const result = await rt.runPromise(
             SessionCompaction.Service.use((svc) =>
               svc.process({
                 parentID: msg.id,
                 messages: msgs,
-                sessionID: session.id,
+                sessionID: session.id as any,
                 auto: true,
                 overflow: true,
               }),
             ),
           )
 
-          const last = (await Session.messages({ sessionID: session.id })).at(-1)
+          const last = (await Session.messages({ sessionID: session.id as any })).at(-1)
 
           expect(result).toBe("continue")
           expect(last?.info.role).toBe("user")
@@ -793,8 +793,8 @@ describe("session.compaction.process", () => {
         spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
 
         const session = await Session.create({})
-        const msg = await user(session.id, "hello")
-        const msgs = await Session.messages({ sessionID: session.id })
+        const msg = await user(session.id as any, "hello")
+        const msgs = await Session.messages({ sessionID: session.id as any })
         const abort = new AbortController()
         const rt = liveRuntime(stub.layer)
         let off: (() => void) | undefined
@@ -816,7 +816,7 @@ describe("session.compaction.process", () => {
                 svc.process({
                   parentID: msg.id,
                   messages: msgs,
-                  sessionID: session.id,
+                  sessionID: session.id as any,
                   auto: false,
                 }),
               ),
@@ -869,8 +869,8 @@ describe("session.compaction.process", () => {
         spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
 
         const session = await Session.create({})
-        const msg = await user(session.id, "hello")
-        const msgs = await Session.messages({ sessionID: session.id })
+        const msg = await user(session.id as any, "hello")
+        const msgs = await Session.messages({ sessionID: session.id as any })
         const abort = new AbortController()
         const rt = runtime("continue", plugin(ready))
         let run: Promise<"continue" | "stop"> | undefined
@@ -881,7 +881,7 @@ describe("session.compaction.process", () => {
                 svc.process({
                   parentID: msg.id,
                   messages: msgs,
-                  sessionID: session.id,
+                  sessionID: session.id as any,
                   auto: false,
                 }),
               ),
@@ -905,7 +905,7 @@ describe("session.compaction.process", () => {
           abort.abort()
           expect(await run).toBe("stop")
 
-          const all = await Session.messages({ sessionID: session.id })
+          const all = await Session.messages({ sessionID: session.id as any })
           expect(all.some((msg) => msg.info.role === "assistant" && msg.info.summary)).toBe(false)
         } finally {
           abort.abort()
@@ -973,22 +973,22 @@ describe("session.compaction.process", () => {
         spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
 
         const session = await Session.create({})
-        const msg = await user(session.id, "hello")
+        const msg = await user(session.id as any, "hello")
         const rt = liveRuntime(stub.layer)
         try {
-          const msgs = await Session.messages({ sessionID: session.id })
+          const msgs = await Session.messages({ sessionID: session.id as any })
           await rt.runPromise(
             SessionCompaction.Service.use((svc) =>
               svc.process({
                 parentID: msg.id,
                 messages: msgs,
-                sessionID: session.id,
+                sessionID: session.id as any,
                 auto: false,
               }),
             ),
           )
 
-          const summary = (await Session.messages({ sessionID: session.id })).find(
+          const summary = (await Session.messages({ sessionID: session.id as any })).find(
             (item) => item.info.role === "assistant" && item.info.summary,
           )
 

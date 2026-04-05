@@ -266,7 +266,7 @@ const it = testEffect(env)
 
 it.live("session.processor effect tests capture llm input cleanly", () => {
   return provideTmpdirInstance(
-    (dir) =>
+    ((dir: any) =>
       Effect.gen(function* () {
         const test = yield* TestLLM
         const processors = yield* SessionProcessor.Service
@@ -274,11 +274,11 @@ it.live("session.processor effect tests capture llm input cleanly", () => {
 
         yield* test.reply(start(), textStart(), textDelta("t", "hello"), textEnd(), finishStep(), finish())
 
-        const chat = yield* session.create({})
+        const chat = yield* (session as any).create({})
         const parent = yield* user(chat.id, "hi")
         const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const mdl = model(100)
-        const handle = yield* processors.create({
+        const handle = yield* (processors as any).create({
           assistantMessage: msg,
           sessionID: chat.id,
           model: mdl,
@@ -311,14 +311,14 @@ it.live("session.processor effect tests capture llm input cleanly", () => {
         expect(inputs).toHaveLength(1)
         expect(inputs[0].messages).toStrictEqual([{ role: "user", content: "hi" }])
         expect(parts.some((part) => part.type === "text" && part.text === "hello")).toBe(true)
-      }),
+      })) as any,
     { git: true },
   )
 })
 
 it.live("session.processor effect tests stop after token overflow requests compaction", () => {
   return provideTmpdirInstance(
-    (dir) =>
+    ((dir: any) =>
       Effect.gen(function* () {
         const test = yield* TestLLM
         const processors = yield* SessionProcessor.Service
@@ -339,11 +339,11 @@ it.live("session.processor effect tests stop after token overflow requests compa
           textEnd(),
         )
 
-        const chat = yield* session.create({})
+        const chat = yield* (session as any).create({})
         const parent = yield* user(chat.id, "compact")
         const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const mdl = model(20)
-        const handle = yield* processors.create({
+        const handle = yield* (processors as any).create({
           assistantMessage: msg,
           sessionID: chat.id,
           model: mdl,
@@ -371,14 +371,14 @@ it.live("session.processor effect tests stop after token overflow requests compa
         expect(value).toBe("compact")
         expect(parts.some((part) => part.type === "text")).toBe(false)
         expect(parts.some((part) => part.type === "step-finish")).toBe(true)
-      }),
+      })) as any,
     { git: true },
   )
 })
 
 it.live("session.processor effect tests reset reasoning state across retries", () => {
   return provideTmpdirInstance(
-    (dir) =>
+    ((dir: any) =>
       Effect.gen(function* () {
         const test = yield* TestLLM
         const processors = yield* SessionProcessor.Service
@@ -410,11 +410,11 @@ it.live("session.processor effect tests reset reasoning state across retries", (
           finish(),
         )
 
-        const chat = yield* session.create({})
+        const chat = yield* (session as any).create({})
         const parent = yield* user(chat.id, "reason")
         const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const mdl = model(100)
-        const handle = yield* processors.create({
+        const handle = yield* (processors as any).create({
           assistantMessage: msg,
           sessionID: chat.id,
           model: mdl,
@@ -444,14 +444,14 @@ it.live("session.processor effect tests reset reasoning state across retries", (
         expect(yield* test.calls).toBe(2)
         expect(reasoning.some((part) => part.text === "two")).toBe(true)
         expect(reasoning.some((part) => part.text === "onetwo")).toBe(false)
-      }),
+      })) as any,
     { git: true },
   )
 })
 
 it.live("session.processor effect tests do not retry unknown json errors", () => {
   return provideTmpdirInstance(
-    (dir) =>
+    ((dir: any) =>
       Effect.gen(function* () {
         const test = yield* TestLLM
         const processors = yield* SessionProcessor.Service
@@ -459,11 +459,11 @@ it.live("session.processor effect tests do not retry unknown json errors", () =>
 
         yield* test.push(fail({ error: { message: "no_kv_space" } }, start()))
 
-        const chat = yield* session.create({})
+        const chat = yield* (session as any).create({})
         const parent = yield* user(chat.id, "json")
         const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const mdl = model(100)
-        const handle = yield* processors.create({
+        const handle = yield* (processors as any).create({
           assistantMessage: msg,
           sessionID: chat.id,
           model: mdl,
@@ -490,14 +490,14 @@ it.live("session.processor effect tests do not retry unknown json errors", () =>
         expect(yield* test.calls).toBe(1)
         expect(yield* test.inputs).toHaveLength(1)
         expect(handle.message.error?.name).toBe("UnknownError")
-      }),
+      })) as any,
     { git: true },
   )
 })
 
 it.live("session.processor effect tests retry recognized structured json errors", () => {
   return provideTmpdirInstance(
-    (dir) =>
+    ((dir: any) =>
       Effect.gen(function* () {
         const test = yield* TestLLM
         const processors = yield* SessionProcessor.Service
@@ -506,11 +506,11 @@ it.live("session.processor effect tests retry recognized structured json errors"
         yield* test.push(fail({ type: "error", error: { type: "too_many_requests" } }, start()))
         yield* test.reply(start(), textStart(), textDelta("t", "after"), textEnd(), finishStep(), finish())
 
-        const chat = yield* session.create({})
+        const chat = yield* (session as any).create({})
         const parent = yield* user(chat.id, "retry json")
         const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const mdl = model(100)
-        const handle = yield* processors.create({
+        const handle = yield* (processors as any).create({
           assistantMessage: msg,
           sessionID: chat.id,
           model: mdl,
@@ -539,14 +539,14 @@ it.live("session.processor effect tests retry recognized structured json errors"
         expect(yield* test.calls).toBe(2)
         expect(parts.some((part) => part.type === "text" && part.text === "after")).toBe(true)
         expect(handle.message.error).toBeUndefined()
-      }),
+      }) as any),
     { git: true },
   )
 })
 
 it.live("session.processor effect tests publish retry status updates", () => {
   return provideTmpdirInstance(
-    (dir) =>
+    ((dir: any) =>
       Effect.gen(function* () {
         const test = yield* TestLLM
         const processors = yield* SessionProcessor.Service
@@ -569,7 +569,7 @@ it.live("session.processor effect tests publish retry status updates", () => {
         )
         yield* test.reply(start(), finishStep(), finish())
 
-        const chat = yield* session.create({})
+        const chat = yield* (session as any).create({})
         const parent = yield* user(chat.id, "retry")
         const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const mdl = model(100)
@@ -578,7 +578,7 @@ it.live("session.processor effect tests publish retry status updates", () => {
           if (evt.properties.sessionID !== chat.id) return
           if (evt.properties.status.type === "retry") states.push(evt.properties.status.attempt)
         })
-        const handle = yield* processors.create({
+        const handle = yield* (processors as any).create({
           assistantMessage: msg,
           sessionID: chat.id,
           model: mdl,
@@ -606,14 +606,14 @@ it.live("session.processor effect tests publish retry status updates", () => {
         expect(value).toBe("continue")
         expect(yield* test.calls).toBe(2)
         expect(states).toStrictEqual([1])
-      }),
+      }) as any),
     { git: true },
   )
 })
 
 it.live("session.processor effect tests compact on structured context overflow", () => {
   return provideTmpdirInstance(
-    (dir) =>
+    ((dir: any) =>
       Effect.gen(function* () {
         const test = yield* TestLLM
         const processors = yield* SessionProcessor.Service
@@ -621,11 +621,11 @@ it.live("session.processor effect tests compact on structured context overflow",
 
         yield* test.push(fail({ type: "error", error: { code: "context_length_exceeded" } }, start()))
 
-        const chat = yield* session.create({})
+        const chat = yield* (session as any).create({})
         const parent = yield* user(chat.id, "compact json")
         const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const mdl = model(100)
-        const handle = yield* processors.create({
+        const handle = yield* (processors as any).create({
           assistantMessage: msg,
           sessionID: chat.id,
           model: mdl,
@@ -651,14 +651,14 @@ it.live("session.processor effect tests compact on structured context overflow",
         expect(value).toBe("compact")
         expect(yield* test.calls).toBe(1)
         expect(handle.message.error).toBeUndefined()
-      }),
+      }) as any),
     { git: true },
   )
 })
 
 it.live("session.processor effect tests mark pending tools as aborted on cleanup", () => {
   return provideTmpdirInstance(
-    (dir) =>
+    ((dir: any) =>
       Effect.gen(function* () {
         const ready = defer<void>()
         const test = yield* TestLLM
@@ -671,11 +671,11 @@ it.live("session.processor effect tests mark pending tools as aborted on cleanup
           ),
         )
 
-        const chat = yield* session.create({})
+        const chat = yield* (session as any).create({})
         const parent = yield* user(chat.id, "tool abort")
         const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const mdl = model(100)
-        const handle = yield* processors.create({
+        const handle = yield* (processors as any).create({
           assistantMessage: msg,
           sessionID: chat.id,
           model: mdl,
@@ -720,14 +720,14 @@ it.live("session.processor effect tests mark pending tools as aborted on cleanup
           expect(tool.state.error).toBe("Tool execution aborted")
           expect(tool.state.time.end).toBeDefined()
         }
-      }),
+      }) as any),
     { git: true },
   )
 })
 
 it.live("session.processor effect tests record aborted errors and idle state", () => {
   return provideTmpdirInstance(
-    (dir) =>
+    ((dir: any) =>
       Effect.gen(function* () {
         const ready = defer<void>()
         const seen = defer<void>()
@@ -743,7 +743,7 @@ it.live("session.processor effect tests record aborted errors and idle state", (
           ),
         )
 
-        const chat = yield* session.create({})
+        const chat = yield* (session as any).create({})
         const parent = yield* user(chat.id, "abort")
         const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const mdl = model(100)
@@ -754,7 +754,7 @@ it.live("session.processor effect tests record aborted errors and idle state", (
           errs.push(evt.properties.error.name)
           seen.resolve()
         })
-        const handle = yield* processors.create({
+        const handle = yield* (processors as any).create({
           assistantMessage: msg,
           sessionID: chat.id,
           model: mdl,
@@ -802,14 +802,14 @@ it.live("session.processor effect tests record aborted errors and idle state", (
         }
         expect(state).toMatchObject({ type: "idle" })
         expect(errs).toContain("MessageAbortedError")
-      }),
+      }) as any),
     { git: true },
   )
 })
 
 it.live("session.processor effect tests mark interruptions aborted without manual abort", () => {
   return provideTmpdirInstance(
-    (dir) =>
+    ((dir: any) =>
       Effect.gen(function* () {
         const ready = defer<void>()
         const processors = yield* SessionProcessor.Service
@@ -823,11 +823,11 @@ it.live("session.processor effect tests mark interruptions aborted without manua
           ),
         )
 
-        const chat = yield* session.create({})
+        const chat = yield* (session as any).create({})
         const parent = yield* user(chat.id, "interrupt")
         const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const mdl = model(100)
-        const handle = yield* processors.create({
+        const handle = yield* (processors as any).create({
           assistantMessage: msg,
           sessionID: chat.id,
           model: mdl,
@@ -866,7 +866,7 @@ it.live("session.processor effect tests mark interruptions aborted without manua
           expect(stored.info.error?.name).toBe("MessageAbortedError")
         }
         expect(state).toMatchObject({ type: "idle" })
-      }),
+      }) as any),
     { git: true },
   )
 })

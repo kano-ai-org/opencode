@@ -157,46 +157,46 @@ export const ImportCommand = cmd({
         ...exportData.info,
         projectID: Instance.project.id,
       })
-      const row = Session.toRow(info)
-      Database.use((db) =>
-        db
-          .insert(SessionTable)
-          .values(row)
-          .onConflictDoUpdate({ target: SessionTable.id, set: { project_id: row.project_id } })
-          .run(),
-      )
+       const row = Session.toRow(info)
+       Database.use((db) =>
+         db
+           .insert(SessionTable)
+           .values(row as any)
+           .onConflictDoUpdate({ target: SessionTable.id, set: { project_id: row.project_id } })
+           .run(),
+       )
 
       for (const msg of exportData.messages) {
         const msgInfo = MessageV2.Info.parse(msg.info)
         const { id, sessionID: _, ...msgData } = msgInfo
-        Database.use((db) =>
-          db
-            .insert(MessageTable)
-            .values({
-              id,
-              session_id: row.id,
-              time_created: msgInfo.time?.created ?? Date.now(),
-              data: msgData,
-            })
-            .onConflictDoNothing()
-            .run(),
-        )
+         Database.use((db) =>
+           db
+             .insert(MessageTable)
+             .values({
+               id,
+               session_id: row.id,
+               time_created: msgInfo.time?.created ?? Date.now(),
+               data: msgData,
+             } as any)
+             .onConflictDoNothing()
+             .run(),
+         )
 
         for (const part of msg.parts) {
           const partInfo = MessageV2.Part.parse(part)
           const { id: partId, sessionID: _s, messageID, ...partData } = partInfo
-          Database.use((db) =>
-            db
-              .insert(PartTable)
-              .values({
-                id: partId,
-                message_id: messageID,
-                session_id: row.id,
-                data: partData,
-              })
-              .onConflictDoNothing()
-              .run(),
-          )
+           Database.use((db) =>
+             db
+               .insert(PartTable)
+               .values({
+                 id: partId,
+                 message_id: messageID,
+                 session_id: row.id,
+                 data: partData,
+               } as any)
+               .onConflictDoNothing()
+               .run(),
+           )
         }
       }
 

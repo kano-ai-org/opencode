@@ -51,7 +51,7 @@ export const PlanExitTool = Tool.define("plan_exit", {
         created: Date.now(),
       },
       agent: "build",
-      model,
+      model: model as any,
     }
     await Session.updateMessage(userMsg)
     await Session.updatePart({

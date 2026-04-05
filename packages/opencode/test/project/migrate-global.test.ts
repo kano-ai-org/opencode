@@ -37,14 +37,16 @@ function seed(opts: { id: SessionID; dir: string; project: ProjectID }) {
 function ensureGlobal() {
   Database.use((db) =>
     db
-      .insert(ProjectTable)
-      .values({
-        id: ProjectID.global,
-        worktree: "/",
-        time_created: Date.now(),
-        time_updated: Date.now(),
-        sandboxes: [],
-      })
+       .insert(ProjectTable)
+       .values({
+         id: ProjectID.global,
+         worktree: "/",
+         time_created: Date.now(),
+         time_updated: Date.now(),
+         sandboxes: [],
+         workspace_toggles: {},
+         workspace_toggles_version: 0,
+       })
       .onConflictDoNothing()
       .run(),
   )
@@ -70,10 +72,10 @@ describe("migrateFromGlobal", () => {
     const { project: real } = await Project.fromDirectory(tmp.path)
     expect(real.id).not.toBe(ProjectID.global)
 
-    // 4. The session should have been migrated to the real project ID
-    const row = Database.use((db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
-    expect(row).toBeDefined()
-    expect(row!.project_id).toBe(real.id)
+     // 4. The session should have been migrated to the real project ID
+     const row = Database.use((db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
+     expect(row).toBeDefined()
+     expect(row!.project_id).toBe(real.id as any)
   })
 
   test("migrates global sessions even when project row already exists", async () => {
@@ -95,9 +97,9 @@ describe("migrateFromGlobal", () => {
     //    so the current code skips migration entirely. This is the bug.
     await Project.fromDirectory(tmp.path)
 
-    const row = Database.use((db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
-    expect(row).toBeDefined()
-    expect(row!.project_id).toBe(project.id)
+     const row = Database.use((db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
+     expect(row).toBeDefined()
+     expect(row!.project_id).toBe(project.id as any)
   })
 
   test("does not claim sessions with empty directory", async () => {

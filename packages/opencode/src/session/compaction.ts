@@ -2,6 +2,7 @@ import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { Session } from "."
 import { SessionID, MessageID, PartID } from "./schema"
+import { ModelID, ProviderID } from "../provider/schema"
 import { Instance } from "../project/instance"
 import { Provider } from "../provider/provider"
 import { MessageV2 } from "./message-v2"
@@ -14,7 +15,6 @@ import { Agent } from "@/agent/agent"
 import { Plugin } from "@/plugin"
 import { Config } from "@/config/config"
 import { NotFoundError } from "@/storage/db"
-import { ModelID, ProviderID } from "@/provider/schema"
 import { Effect, Layer, ServiceMap } from "effect"
 import { makeRuntime } from "@/effect/run-service"
 import { InstanceState } from "@/effect/instance-state"
@@ -228,18 +228,18 @@ When constructing the summary, try to stick to this template:
             cwd: ctx.directory,
             root: ctx.worktree,
           },
-          cost: 0,
-          tokens: {
-            output: 0,
-            input: 0,
-            reasoning: 0,
-            cache: { read: 0, write: 0 },
-          },
-          modelID: model.id,
-          providerID: model.providerID,
-          time: {
-            created: Date.now(),
-          },
+           cost: 0,
+           tokens: {
+             output: 0,
+             input: 0,
+             reasoning: 0,
+             cache: { read: 0, write: 0 },
+           },
+           modelID: ModelID.make(model.id),
+           providerID: ProviderID.make(model.providerID),
+           time: {
+             created: Date.now(),
+           },
         }
         yield* session.updateMessage(msg)
         const processor = yield* processors.create({

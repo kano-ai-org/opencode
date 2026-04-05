@@ -91,6 +91,13 @@ export namespace Plugin {
     }
 
     for (let plugin of plugins) {
+      // Handle plugin tuple form (string | [string, options])
+      if (Array.isArray(plugin)) {
+        const [path] = plugin
+        plugin = path
+      }
+      
+      // Handle plugin string form
       // ignore old codex plugin since it is supported first party now
       if (plugin.includes("opencode-openai-codex-auth")) continue
       log.info("loading plugin", { path: plugin })

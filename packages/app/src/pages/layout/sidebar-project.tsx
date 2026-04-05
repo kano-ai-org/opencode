@@ -215,7 +215,6 @@ const ProjectPreviewPanel = (props: {
               <SessionItem
                 {...props.ctx.sessionProps}
                 session={session}
-                list={props.projectSessions()}
                 slug={base64Encode(props.project.worktree)}
                 dense
                 mobile={props.mobile}
@@ -243,7 +242,6 @@ const ProjectPreviewPanel = (props: {
                     <SessionItem
                       {...props.ctx.sessionProps}
                       session={session}
-                      list={sessions()}
                       slug={base64Encode(directory)}
                       dense
                       mobile={props.mobile}

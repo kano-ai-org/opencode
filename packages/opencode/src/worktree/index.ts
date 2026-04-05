@@ -7,6 +7,7 @@ import { Project } from "../project/project"
 import { Database, eq } from "../storage/db"
 import { ProjectTable } from "../project/project.sql"
 import type { ProjectID } from "../project/schema"
+import { ProjectID as ProjectIDSchema } from "../project/schema"
 import { Log } from "../util/log"
 import { Slug } from "@opencode-ai/util/slug"
 import { errorMessage } from "../util/error"
@@ -170,7 +171,7 @@ export namespace Worktree {
   export const layer: Layer.Layer<
     Service,
     never,
-    AppFileSystem.Service | Path.Path | ChildProcessSpawner.ChildProcessSpawner | Project.Service
+    AppFileSystem.Service | Path.Path | ChildProcessSpawner.ChildProcessSpawner
   > = Layer.effect(
     Service,
     Effect.gen(function* () {
@@ -178,7 +179,6 @@ export namespace Worktree {
       const fs = yield* AppFileSystem.Service
       const pathSvc = yield* Path.Path
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-      const project = yield* Project.Service
 
       const git = Effect.fnUntraced(
         function* (args: string[], opts?: { cwd?: string }) {
@@ -239,7 +239,7 @@ export namespace Worktree {
           throw new CreateFailedError({ message: created.stderr || created.text || "Failed to create git worktree" })
         }
 
-        yield* project.addSandbox(ctx.project.id, info.directory).pipe(Effect.catch(() => Effect.void))
+        yield* Effect.promise(() => Project.addSandbox(ctx.project.id, info.directory)).pipe(Effect.catch(() => Effect.void))
       })
 
       const boot = Effect.fnUntraced(function* (info: Info, startCommand?: string) {
@@ -285,7 +285,7 @@ export namespace Worktree {
           },
         })
 
-        yield* runStartScripts(info.directory, { projectID, extra })
+        yield* runStartScripts(info.directory, { projectID: ProjectIDSchema.make(projectID), extra })
       })
 
       const createFromInfo = Effect.fn("Worktree.createFromInfo")(function* (info: Info, startCommand?: string) {
@@ -601,7 +601,7 @@ export namespace Worktree {
           throw new ResetFailedError({ message: `Worktree reset left local changes:\n${status.text.trim()}` })
         }
 
-        yield* runStartScripts(worktreePath, { projectID: Instance.project.id }).pipe(
+        yield* runStartScripts(worktreePath, { projectID: ProjectIDSchema.make(Instance.project.id) }).pipe(
           Effect.catchCause((cause) => Effect.sync(() => log.error("worktree start task failed", { cause }))),
           Effect.forkIn(scope),
         )
@@ -615,7 +615,6 @@ export namespace Worktree {
 
   const defaultLayer = layer.pipe(
     Layer.provide(CrossSpawnSpawner.defaultLayer),
-    Layer.provide(Project.defaultLayer),
     Layer.provide(AppFileSystem.defaultLayer),
     Layer.provide(NodePath.layer),
   )

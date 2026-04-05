@@ -20,13 +20,13 @@ describe("tui.selectSession endpoint", () => {
         // #given
         const session = await Session.create({})
 
-        // #when
-        const app = Server.Default()
-        const response = await app.request("/tui/select-session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionID: session.id }),
-        })
+         // #when
+         const app = Server.App()
+         const response = await app.request("/tui/select-session", {
+           method: "POST",
+           headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({ sessionID: session.id }),
+         })
 
         // #then
         expect(response.status).toBe(200)
@@ -46,13 +46,13 @@ describe("tui.selectSession endpoint", () => {
         // #given
         const nonExistentSessionID = "ses_nonexistent123"
 
-        // #when
-        const app = Server.Default()
-        const response = await app.request("/tui/select-session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionID: nonExistentSessionID }),
-        })
+         // #when
+         const app = Server.App()
+         const response = await app.request("/tui/select-session", {
+           method: "POST",
+           headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({ sessionID: nonExistentSessionID }),
+         })
 
         // #then
         expect(response.status).toBe(404)
@@ -68,13 +68,13 @@ describe("tui.selectSession endpoint", () => {
         // #given
         const invalidSessionID = "invalid_session_id"
 
-        // #when
-        const app = Server.Default()
-        const response = await app.request("/tui/select-session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionID: invalidSessionID }),
-        })
+         // #when
+         const app = Server.App()
+         const response = await app.request("/tui/select-session", {
+           method: "POST",
+           headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({ sessionID: invalidSessionID }),
+         })
 
         // #then
         expect(response.status).toBe(400)

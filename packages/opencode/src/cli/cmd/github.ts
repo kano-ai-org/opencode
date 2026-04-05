@@ -23,7 +23,7 @@ import { Instance } from "@/project/instance"
 import { bootstrap } from "../bootstrap"
 import { Session } from "../../session"
 import type { SessionID } from "../../session/schema"
-import { MessageID, PartID } from "../../session/schema"
+import { SessionID as SessionIDMake, MessageID, PartID } from "../../session/schema"
 import { Provider } from "../../provider/provider"
 import { Bus } from "../../bus"
 import { MessageV2 } from "../../session/message-v2"
@@ -544,17 +544,18 @@ export const GithubRunCommand = cmd({
           await addReaction(commentType)
         }
 
-        // Setup opencode session
-        const repoData = await fetchRepo()
-        session = await Session.create({
-          permission: [
-            {
-              permission: "question",
-              action: "deny",
-              pattern: "*",
-            },
-          ],
-        })
+         // Setup opencode session
+         const repoData = await fetchRepo()
+         const createdSession = await Session.create({
+           permission: [
+             {
+               permission: "question",
+               action: "deny",
+               pattern: "*",
+             },
+           ],
+         })
+         session = { id: SessionIDMake.make(createdSession.id), title: createdSession.title, version: createdSession.version }
         subscribeSessionEvents()
         shareId = await (async () => {
           if (share === false) return

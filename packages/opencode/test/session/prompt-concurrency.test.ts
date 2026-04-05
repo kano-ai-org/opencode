@@ -73,13 +73,13 @@ describe("session.prompt concurrency", () => {
       directory: tmp.path,
       fn: async () => {
         const session = await Session.create({})
-        await seed(session.id)
+        await seed(session.id as any)
 
         const result = await SessionPrompt.loop({ sessionID: session.id })
         expect(result.info.role).toBe("assistant")
-        if (result.info.role === "assistant") expect(result.info.finish).toBe("stop")
+         if (result.info.role === "assistant") expect(result.info.finish).toBe("stop")
 
-        const status = await SessionStatus.get(session.id)
+        const status = await SessionStatus.get(session.id as any)
         expect(status.type).toBe("idle")
       },
     })
@@ -91,7 +91,7 @@ describe("session.prompt concurrency", () => {
       directory: tmp.path,
       fn: async () => {
         const session = await Session.create({})
-        await seed(session.id)
+        await seed(session.id as any)
 
         const [a, b] = await Promise.all([
           SessionPrompt.loop({ sessionID: session.id }),
@@ -113,7 +113,7 @@ describe("session.prompt concurrency", () => {
         const userMsg: MessageV2.Info = {
           id: MessageID.ascending(),
           role: "user",
-          sessionID: session.id,
+          sessionID: session.id as any,
           time: { created: Date.now() },
           agent: "build",
           model: { providerID: "openai" as any, modelID: "gpt-5.2" as any },
@@ -122,7 +122,7 @@ describe("session.prompt concurrency", () => {
         await Session.updatePart({
           id: PartID.ascending(),
           messageID: userMsg.id,
-          sessionID: session.id,
+          sessionID: session.id as any,
           type: "text",
           text: "hello",
         })
@@ -164,7 +164,7 @@ describe("session.prompt concurrency", () => {
         const userMsg: MessageV2.Info = {
           id: MessageID.ascending(),
           role: "user",
-          sessionID: session.id,
+          sessionID: session.id as any,
           time: { created: Date.now() },
           agent: "build",
           model: { providerID: "openai" as any, modelID: "gpt-5.2" as any },
@@ -173,7 +173,7 @@ describe("session.prompt concurrency", () => {
         await Session.updatePart({
           id: PartID.ascending(),
           messageID: userMsg.id,
-          sessionID: session.id,
+          sessionID: session.id as any,
           type: "text",
           text: "hello",
         })
@@ -182,7 +182,7 @@ describe("session.prompt concurrency", () => {
           id: MessageID.ascending(),
           role: "assistant",
           parentID: userMsg.id,
-          sessionID: session.id,
+          sessionID: session.id as any,
           mode: "build",
           agent: "build",
           cost: 0,
@@ -196,7 +196,7 @@ describe("session.prompt concurrency", () => {
         await Session.updatePart({
           id: PartID.ascending(),
           messageID: assistantMsg.id,
-          sessionID: session.id,
+          sessionID: session.id as any,
           type: "text",
           text: "hi there",
         })
@@ -217,7 +217,7 @@ describe("session.prompt concurrency", () => {
 
           await SessionPrompt.cancel(session.id)
 
-          const status = await SessionStatus.get(session.id)
+        const status = await SessionStatus.get(session.id as any)
           expect(status.type).toBe("idle")
 
           // loop should resolve cleanly, not throw "All fibers interrupted"
@@ -238,8 +238,8 @@ describe("session.prompt concurrency", () => {
       directory: tmp.path,
       fn: async () => {
         const session = await Session.create({})
-        await SessionPrompt.cancel(session.id)
-        const status = await SessionStatus.get(session.id)
+        await SessionPrompt.cancel(session.id as any)
+        const status = await SessionStatus.get(session.id as any)
         expect(status.type).toBe("idle")
       },
     })

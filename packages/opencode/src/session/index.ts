@@ -17,12 +17,15 @@ import { ProjectTable } from "../project/project.sql"
 import { Storage } from "@/storage/storage"
 import { Log } from "../util/log"
 import { MessageV2 } from "./message-v2"
+import { SessionID, MessageID, PartID } from "./schema"
 import { Instance } from "../project/instance"
 import { SessionPrompt } from "./prompt"
 import { fn } from "@/util/fn"
 import { Command } from "../command"
 import { Snapshot } from "@/snapshot"
 import { WorkspaceContext } from "../control-plane/workspace-context"
+import { WorkspaceID } from "../control-plane/schema"
+import { ProjectID } from "../project/schema"
 
 import type { Provider } from "@/provider/provider"
 import { PermissionNext } from "@/permission/next"
@@ -90,11 +93,12 @@ export namespace Session {
   }
 
   export function toRow(info: Info) {
+    const rev = info.revert
     return {
-      id: info.id,
-      project_id: info.projectID,
-      workspace_id: info.workspaceID,
-      parent_id: info.parentID,
+      id: SessionID.make(info.id),
+      project_id: ProjectID.make(info.projectID),
+      workspace_id: info.workspaceID ? WorkspaceID.make(info.workspaceID) : undefined,
+      parent_id: info.parentID ? SessionID.make(info.parentID) : undefined,
       slug: info.slug,
       directory: info.directory,
       title: info.title,
@@ -104,7 +108,14 @@ export namespace Session {
       summary_deletions: info.summary?.deletions,
       summary_files: info.summary?.files,
       summary_diffs: info.summary?.diffs,
-      revert: info.revert ?? null,
+      revert: rev
+        ? {
+            messageID: MessageID.make(rev.messageID),
+            partID: rev.partID ? PartID.make(rev.partID) : undefined,
+            snapshot: rev.snapshot,
+            diff: rev.diff,
+          }
+        : null,
       permission: info.permission,
       time_created: info.time.created,
       time_updated: info.time.updated,
@@ -252,17 +263,18 @@ export namespace Session {
         title,
       })
       const msgs = await messages({ sessionID: input.sessionID })
-      const idMap = new Map<string, string>()
+      const idMap = new Map<MessageID, MessageID>()
+      const sid = SessionID.make(session.id)
 
       for (const msg of msgs) {
         if (input.messageID && msg.info.id >= input.messageID) break
-        const newID = Identifier.ascending("message")
+        const newID = MessageID.ascending()
         idMap.set(msg.info.id, newID)
 
         const parentID = msg.info.role === "assistant" && msg.info.parentID ? idMap.get(msg.info.parentID) : undefined
         const cloned = await updateMessage({
           ...msg.info,
-          sessionID: session.id,
+          sessionID: sid,
           id: newID,
           ...(parentID && { parentID }),
         })
@@ -270,9 +282,9 @@ export namespace Session {
         for (const part of msg.parts) {
           await updatePart({
             ...part,
-            id: Identifier.ascending("part"),
+            id: PartID.ascending(),
             messageID: cloned.id,
-            sessionID: session.id,
+            sessionID: sid,
           })
         }
       }
@@ -286,7 +298,7 @@ export namespace Session {
       const row = db
         .update(SessionTable)
         .set({ time_updated: now })
-        .where(eq(SessionTable.id, sessionID))
+        .where(eq(SessionTable.id, SessionID.make(sessionID)))
         .returning()
         .get()
       if (!row) throw new NotFoundError({ message: `Session not found: ${sessionID}` })
@@ -345,7 +357,7 @@ export namespace Session {
   }
 
   export const get = fn(Identifier.schema("session"), async (id) => {
-    const row = Database.use((db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
+    const row = Database.use((db) => db.select().from(SessionTable).where(eq(SessionTable.id, SessionID.make(id))).get())
     if (!row) throw new NotFoundError({ message: `Session not found: ${id}` })
     return fromRow(row)
   })
@@ -356,9 +368,14 @@ export namespace Session {
       throw new Error("Sharing is disabled in configuration")
     }
     const { ShareNext } = await import("@/share/share-next")
-    const share = await ShareNext.create(id)
+    const share = await ShareNext.create(SessionID.make(id))
     Database.use((db) => {
-      const row = db.update(SessionTable).set({ share_url: share.url }).where(eq(SessionTable.id, id)).returning().get()
+      const row = db
+        .update(SessionTable)
+        .set({ share_url: share.url })
+        .where(eq(SessionTable.id, SessionID.make(id)))
+        .returning()
+        .get()
       if (!row) throw new NotFoundError({ message: `Session not found: ${id}` })
       const info = fromRow(row)
       Database.effect(() => Bus.publish(Event.Updated, { info }))
@@ -369,9 +386,14 @@ export namespace Session {
   export const unshare = fn(Identifier.schema("session"), async (id) => {
     // Use ShareNext to remove the share (same as share function uses ShareNext to create)
     const { ShareNext } = await import("@/share/share-next")
-    await ShareNext.remove(id)
+    await ShareNext.remove(SessionID.make(id))
     Database.use((db) => {
-      const row = db.update(SessionTable).set({ share_url: null }).where(eq(SessionTable.id, id)).returning().get()
+      const row = db
+        .update(SessionTable)
+        .set({ share_url: null })
+        .where(eq(SessionTable.id, SessionID.make(id)))
+        .returning()
+        .get()
       if (!row) throw new NotFoundError({ message: `Session not found: ${id}` })
       const info = fromRow(row)
       Database.effect(() => Bus.publish(Event.Updated, { info }))
@@ -388,7 +410,7 @@ export namespace Session {
         const row = db
           .update(SessionTable)
           .set({ title: input.title })
-          .where(eq(SessionTable.id, input.sessionID))
+          .where(eq(SessionTable.id, SessionID.make(input.sessionID)))
           .returning()
           .get()
         if (!row) throw new NotFoundError({ message: `Session not found: ${input.sessionID}` })
@@ -409,7 +431,7 @@ export namespace Session {
         const row = db
           .update(SessionTable)
           .set({ time_archived: input.time })
-          .where(eq(SessionTable.id, input.sessionID))
+          .where(eq(SessionTable.id, SessionID.make(input.sessionID)))
           .returning()
           .get()
         if (!row) throw new NotFoundError({ message: `Session not found: ${input.sessionID}` })
@@ -430,7 +452,7 @@ export namespace Session {
         const row = db
           .update(SessionTable)
           .set({ permission: input.permission, time_updated: Date.now() })
-          .where(eq(SessionTable.id, input.sessionID))
+          .where(eq(SessionTable.id, SessionID.make(input.sessionID)))
           .returning()
           .get()
         if (!row) throw new NotFoundError({ message: `Session not found: ${input.sessionID}` })
@@ -448,17 +470,26 @@ export namespace Session {
       summary: Info.shape.summary,
     }),
     async (input) => {
+      const rev = input.revert
+      const next = rev
+        ? {
+            messageID: MessageID.make(rev.messageID),
+            partID: rev.partID ? PartID.make(rev.partID) : undefined,
+            snapshot: rev.snapshot,
+            diff: rev.diff,
+          }
+        : null
       return Database.use((db) => {
         const row = db
           .update(SessionTable)
           .set({
-            revert: input.revert ?? null,
+            revert: next,
             summary_additions: input.summary?.additions,
             summary_deletions: input.summary?.deletions,
             summary_files: input.summary?.files,
             time_updated: Date.now(),
           })
-          .where(eq(SessionTable.id, input.sessionID))
+          .where(eq(SessionTable.id, SessionID.make(input.sessionID)))
           .returning()
           .get()
         if (!row) throw new NotFoundError({ message: `Session not found: ${input.sessionID}` })
@@ -477,7 +508,7 @@ export namespace Session {
           revert: null,
           time_updated: Date.now(),
         })
-        .where(eq(SessionTable.id, sessionID))
+        .where(eq(SessionTable.id, SessionID.make(sessionID)))
         .returning()
         .get()
       if (!row) throw new NotFoundError({ message: `Session not found: ${sessionID}` })
@@ -502,7 +533,7 @@ export namespace Session {
             summary_files: input.summary?.files,
             time_updated: Date.now(),
           })
-          .where(eq(SessionTable.id, input.sessionID))
+          .where(eq(SessionTable.id, SessionID.make(input.sessionID)))
           .returning()
           .get()
         if (!row) throw new NotFoundError({ message: `Session not found: ${input.sessionID}` })
@@ -528,7 +559,7 @@ export namespace Session {
     }),
     async (input) => {
       const result = [] as MessageV2.WithParts[]
-      for await (const msg of MessageV2.stream(input.sessionID)) {
+      for await (const msg of MessageV2.stream(SessionID.make(input.sessionID))) {
         if (input.limit && result.length >= input.limit) break
         result.push(msg)
       }
@@ -547,10 +578,10 @@ export namespace Session {
     limit?: number
   }) {
     const project = Instance.project
-    const conditions = [eq(SessionTable.project_id, input?.projectID ?? project.id)]
+    const conditions = [eq(SessionTable.project_id, ProjectID.make(input?.projectID ?? project.id))]
 
     if (WorkspaceContext.workspaceID) {
-      conditions.push(eq(SessionTable.workspace_id, WorkspaceContext.workspaceID))
+      conditions.push(eq(SessionTable.workspace_id, WorkspaceID.make(WorkspaceContext.workspaceID)))
     }
     if (input?.directory) {
       const key = pathkey(input.directory)
@@ -662,7 +693,12 @@ export namespace Session {
       db
         .select()
         .from(SessionTable)
-        .where(and(eq(SessionTable.project_id, project.id), eq(SessionTable.parent_id, parentID)))
+        .where(
+          and(
+            eq(SessionTable.project_id, ProjectID.make(project.id)),
+            eq(SessionTable.parent_id, SessionID.make(parentID)),
+          ),
+        )
         .all(),
     )
     return rows.map(fromRow)
@@ -678,7 +714,7 @@ export namespace Session {
       await unshare(sessionID).catch(() => {})
       // CASCADE delete handles messages and parts automatically
       Database.use((db) => {
-        db.delete(SessionTable).where(eq(SessionTable.id, sessionID)).run()
+        db.delete(SessionTable).where(eq(SessionTable.id, SessionID.make(sessionID))).run()
         Database.effect(() =>
           Bus.publish(Event.Deleted, {
             info: session,
@@ -705,6 +741,7 @@ export namespace Session {
         .run()
       Database.effect(() =>
         Bus.publish(MessageV2.Event.Updated, {
+          sessionID: msg.sessionID,
           info: msg,
         }),
       )
@@ -718,15 +755,17 @@ export namespace Session {
       messageID: Identifier.schema("message"),
     }),
     async (input) => {
+      const sid = SessionID.make(input.sessionID)
+      const mid = MessageID.make(input.messageID)
       // CASCADE delete handles parts automatically
       Database.use((db) => {
         db.delete(MessageTable)
-          .where(and(eq(MessageTable.id, input.messageID), eq(MessageTable.session_id, input.sessionID)))
+          .where(and(eq(MessageTable.id, mid), eq(MessageTable.session_id, sid)))
           .run()
         Database.effect(() =>
           Bus.publish(MessageV2.Event.Removed, {
-            sessionID: input.sessionID,
-            messageID: input.messageID,
+            sessionID: sid,
+            messageID: mid,
           }),
         )
       })
@@ -741,15 +780,18 @@ export namespace Session {
       partID: Identifier.schema("part"),
     }),
     async (input) => {
+      const sid = SessionID.make(input.sessionID)
+      const mid = MessageID.make(input.messageID)
+      const pid = PartID.make(input.partID)
       Database.use((db) => {
         db.delete(PartTable)
-          .where(and(eq(PartTable.id, input.partID), eq(PartTable.session_id, input.sessionID)))
+          .where(and(eq(PartTable.id, pid), eq(PartTable.session_id, sid)))
           .run()
         Database.effect(() =>
           Bus.publish(MessageV2.Event.PartRemoved, {
-            sessionID: input.sessionID,
-            messageID: input.messageID,
-            partID: input.partID,
+            sessionID: sid,
+            messageID: mid,
+            partID: pid,
           }),
         )
       })
@@ -775,7 +817,9 @@ export namespace Session {
         .run()
       Database.effect(() =>
         Bus.publish(MessageV2.Event.PartUpdated, {
+          sessionID: part.sessionID,
           part: structuredClone(part),
+          time,
         }),
       )
     })
@@ -791,7 +835,13 @@ export namespace Session {
       delta: z.string(),
     }),
     async (input) => {
-      Bus.publish(MessageV2.Event.PartDelta, input)
+      Bus.publish(MessageV2.Event.PartDelta, {
+        sessionID: SessionID.make(input.sessionID),
+        messageID: MessageID.make(input.messageID),
+        partID: PartID.make(input.partID),
+        field: input.field,
+        delta: input.delta,
+      })
     },
   )
 

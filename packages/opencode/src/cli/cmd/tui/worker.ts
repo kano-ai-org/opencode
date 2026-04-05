@@ -122,7 +122,7 @@ export const rpc = {
       headers,
       body: input.body,
     })
-    const response = await Server.Default().fetch(request)
+    const response = await Server.App().fetch(request)
     const body = await response.text()
     return {
       status: response.status,

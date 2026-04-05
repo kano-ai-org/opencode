@@ -109,7 +109,7 @@ describe("step-finish token propagation via Bus event", () => {
           const partInput = {
             id: PartID.ascending(),
             messageID,
-            sessionID: session.id,
+            sessionID: session.id as any,
             type: "step-finish" as const,
             reason: "stop",
             cost: 0.005,

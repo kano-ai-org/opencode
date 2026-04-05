@@ -9,15 +9,15 @@ const modelID = parts[1] ?? "gpt-5-nano"
 const now = Date.now()
 
 const seed = async () => {
-  const { Instance } = await import("../src/project/instance")
-  const { InstanceBootstrap } = await import("../src/project/bootstrap")
-  const { Config } = await import("../src/config/config")
-  const { Provider } = await import("../src/provider/provider")
-  const { Session } = await import("../src/session")
-  const { MessageID, PartID } = await import("../src/session/schema")
-  const { Project } = await import("../src/project/project")
-  const { ModelID, ProviderID } = await import("../src/provider/schema")
-  const { ToolRegistry } = await import("../src/tool/registry")
+   const { Instance } = await import("../src/project/instance")
+   const { InstanceBootstrap } = await import("../src/project/bootstrap")
+   const { Config } = await import("../src/config/config")
+   const { Provider } = await import("../src/provider/provider")
+   const { Session } = await import("../src/session")
+   const { SessionID, MessageID, PartID } = await import("../src/session/schema")
+   const { Project } = await import("../src/project/project")
+   const { ModelID, ProviderID } = await import("../src/provider/schema")
+   const { ToolRegistry } = await import("../src/tool/registry")
 
   try {
     await Instance.provide({
@@ -40,28 +40,29 @@ const seed = async () => {
           }
         }
 
-        const session = await Session.create({ title })
-        const messageID = MessageID.ascending()
-        const partID = PartID.ascending()
-        const message = {
-          id: messageID,
-          sessionID: session.id,
-          role: "user" as const,
-          time: { created: now },
-          agent: "build",
-          model: {
-            providerID: ProviderID.make(providerID),
-            modelID: ModelID.make(modelID),
-          },
-        }
-        const part = {
-          id: partID,
-          sessionID: session.id,
-          messageID,
-          type: "text" as const,
-          text,
-          time: { start: now },
-        }
+         const session = await Session.create({ title })
+         const messageID = MessageID.ascending()
+         const partID = PartID.ascending()
+         const sessionID = SessionID.make(session.id)
+         const message = {
+           id: messageID,
+           sessionID,
+           role: "user" as const,
+           time: { created: now },
+           agent: "build",
+           model: {
+             providerID: ProviderID.make(providerID),
+             modelID: ModelID.make(modelID),
+           },
+         }
+         const part = {
+           id: partID,
+           sessionID,
+           messageID,
+           type: "text" as const,
+           text,
+           time: { start: now },
+         }
         await Session.updateMessage(message)
         await Session.updatePart(part)
         await Project.update({ projectID: Instance.project.id, name: "E2E Project" })

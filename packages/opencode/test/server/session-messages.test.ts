@@ -59,8 +59,8 @@ describe("session messages endpoint", () => {
       Instance.provide({
         directory: tmp.path,
         fn: async () => {
-          const session = await Session.create({})
-          const ids = await fill(session.id, 5)
+           const session = await Session.create({})
+           const ids = await fill(session.id as any, 5)
           const app = Server.App()
 
           const a = await app.request(`/session/${session.id}/message?limit=2`)
@@ -88,8 +88,8 @@ describe("session messages endpoint", () => {
       Instance.provide({
         directory: tmp.path,
         fn: async () => {
-          const session = await Session.create({})
-          const ids = await fill(session.id, 3)
+           const session = await Session.create({})
+           const ids = await fill(session.id as any, 3)
           const app = Server.App()
 
           const res = await app.request(`/session/${session.id}/message`)
@@ -130,8 +130,8 @@ describe("session messages endpoint", () => {
       Instance.provide({
         directory: tmp.path,
         fn: async () => {
-          const session = await Session.create({})
-          await fill(session.id, 520)
+           const session = await Session.create({})
+           await fill(session.id as any, 520)
           const app = Server.App()
 
           const res = await app.request(`/session/${session.id}/message?limit=510`)

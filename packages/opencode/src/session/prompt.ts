@@ -181,7 +181,7 @@ export namespace SessionPrompt {
       return message
     }
 
-    return loop({ sessionID: input.sessionID })
+    return loop({ sessionID: input.sessionID as any })
   })
 
   export async function resolvePromptParts(template: string): Promise<PromptInput["parts"]> {
@@ -258,12 +258,12 @@ export namespace SessionPrompt {
     const s = state()
     const match = s[sessionID]
     if (!match) {
-      SessionStatus.set(sessionID, { type: "idle" })
+      SessionStatus.set(sessionID as any, { type: "idle" })
       return
     }
     match.abort.abort()
     delete s[sessionID]
-    SessionStatus.set(sessionID, { type: "idle" })
+    SessionStatus.set(sessionID as any, { type: "idle" })
     return
   }
 
@@ -292,10 +292,10 @@ export namespace SessionPrompt {
     let step = 0
     const session = await Session.get(sessionID)
     while (true) {
-      SessionStatus.set(sessionID, { type: "busy" })
+      SessionStatus.set(sessionID as any, { type: "busy" })
       log.info("loop", { step, sessionID })
       if (abort.aborted) break
-      let msgs = await MessageV2.filterCompacted(MessageV2.stream(sessionID))
+      let msgs = await MessageV2.filterCompacted(MessageV2.stream(sessionID as any))
 
       let lastUser: MessageV2.User | undefined
       let lastAssistant: MessageV2.Assistant | undefined
@@ -354,35 +354,35 @@ export namespace SessionPrompt {
       if (task?.type === "subtask") {
         const taskTool = await TaskTool.init()
         const taskModel = task.model ? await Provider.getModel(task.model.providerID, task.model.modelID) : model
-        const assistantMessage = (await Session.updateMessage({
-          id: Identifier.ascending("message"),
-          role: "assistant",
-          parentID: lastUser.id,
-          sessionID,
-          mode: task.agent,
-          agent: task.agent,
-          variant: lastUser.variant,
-          path: {
-            cwd: Instance.directory,
-            root: Instance.worktree,
-          },
-          cost: 0,
-          tokens: {
-            input: 0,
-            output: 0,
-            reasoning: 0,
-            cache: { read: 0, write: 0 },
-          },
-          modelID: taskModel.id,
-          providerID: taskModel.providerID,
-          time: {
-            created: Date.now(),
-          },
-        })) as MessageV2.Assistant
-        let part = (await Session.updatePart({
-          id: Identifier.ascending("part"),
-          messageID: assistantMessage.id,
-          sessionID: assistantMessage.sessionID,
+         const assistantMessage = (await Session.updateMessage({
+           id: Identifier.ascending("message") as any,
+           role: "assistant",
+           parentID: lastUser.id,
+           sessionID: sessionID as any,
+           mode: task.agent,
+           agent: task.agent,
+           variant: lastUser.variant,
+           path: {
+             cwd: Instance.directory,
+             root: Instance.worktree,
+           },
+           cost: 0,
+           tokens: {
+             input: 0,
+             output: 0,
+             reasoning: 0,
+             cache: { read: 0, write: 0 },
+           },
+           modelID: taskModel.id as any,
+           providerID: taskModel.providerID as any,
+           time: {
+             created: Date.now(),
+           },
+         })) as MessageV2.Assistant
+         let part = (await Session.updatePart({
+           id: Identifier.ascending("part") as any,
+           messageID: assistantMessage.id,
+           sessionID: assistantMessage.sessionID as any,
           type: "tool",
           callID: ulid(),
           tool: TaskTool.id,
@@ -416,30 +416,30 @@ export namespace SessionPrompt {
         )
         let executionError: Error | undefined
         const taskAgent = await Agent.get(task.agent)
-        const taskCtx: Tool.Context = {
-          agent: task.agent,
-          messageID: assistantMessage.id,
-          sessionID: sessionID,
-          abort,
-          callID: part.callID,
-          extra: { bypassAgentCheck: true },
-          messages: msgs,
-          async metadata(input) {
-            await Session.updatePart({
-              ...part,
-              type: "tool",
-              state: {
-                ...part.state,
-                ...input,
-              },
-            } satisfies MessageV2.ToolPart)
-          },
-          async ask(req) {
-            await PermissionNext.ask({
-              ...req,
-              sessionID: sessionID,
-              ruleset: PermissionNext.merge(taskAgent.permission, session.permission ?? []),
-            })
+         const taskCtx: Tool.Context = {
+           agent: task.agent,
+           messageID: assistantMessage.id,
+           sessionID: sessionID as any,
+           abort,
+           callID: part.callID,
+           extra: { bypassAgentCheck: true },
+           messages: msgs,
+           async metadata(input) {
+             await Session.updatePart({
+               ...part,
+               type: "tool",
+               state: {
+                 ...part.state,
+                 ...input,
+               },
+             } satisfies MessageV2.ToolPart)
+           },
+           async ask(req) {
+             await PermissionNext.ask({
+               ...req,
+               sessionID: sessionID as any,
+               ruleset: PermissionNext.merge(taskAgent.permission, session.permission ?? []),
+             })
           },
         }
         const result = await taskTool.execute(taskArgs, taskCtx).catch((error) => {
@@ -447,12 +447,12 @@ export namespace SessionPrompt {
           log.error("subtask execution failed", { error, agent: task.agent, description: task.description })
           return undefined
         })
-        const attachments = result?.attachments?.map((attachment) => ({
-          ...attachment,
-          id: Identifier.ascending("part"),
-          sessionID,
-          messageID: assistantMessage.id,
-        }))
+         const attachments = result?.attachments?.map((attachment) => ({
+           ...attachment,
+           id: Identifier.ascending("part") as any,
+           sessionID: sessionID as any,
+           messageID: assistantMessage.id,
+         }))
         await Plugin.trigger(
           "tool.execute.after",
           {
@@ -503,56 +503,55 @@ export namespace SessionPrompt {
           // Add synthetic user message to prevent certain reasoning models from erroring
           // If we create assistant messages w/ out user ones following mid loop thinking signatures
           // will be missing and it can cause errors for models like gemini for example
-          const summaryUserMsg: MessageV2.User = {
-            id: Identifier.ascending("message"),
-            sessionID,
-            role: "user",
-            time: {
-              created: Date.now(),
-            },
-            agent: lastUser.agent,
-            model: currentUserModel,
-          }
-          await Session.updateMessage(summaryUserMsg)
-          await Session.updatePart({
-            id: Identifier.ascending("part"),
-            messageID: summaryUserMsg.id,
-            sessionID,
-            type: "text",
-            text: "Summarize the task tool output above and continue with your task.",
-            synthetic: true,
-          } satisfies MessageV2.TextPart)
+           const summaryUserMsg: MessageV2.User = {
+             id: Identifier.ascending("message") as any,
+             sessionID: sessionID as any,
+             role: "user",
+             time: {
+               created: Date.now(),
+             },
+             agent: lastUser.agent,
+             model: currentUserModel,
+           }
+           await Session.updateMessage(summaryUserMsg)
+           await Session.updatePart({
+             id: Identifier.ascending("part") as any,
+             messageID: summaryUserMsg.id,
+             sessionID: sessionID as any,
+             type: "text",
+             text: "Summarize the task tool output above and continue with your task.",
+             synthetic: true,
+           } satisfies MessageV2.TextPart)
         }
 
         continue
       }
 
-      // pending compaction
-      if (task?.type === "compaction") {
+       // pending compaction
+       if (task?.type === "compaction") {
         const result = await SessionCompaction.process({
-          messages: msgs,
-          parentID: lastUser.id,
-          abort,
-          sessionID,
-          auto: task.auto,
-          overflow: task.overflow,
-        })
-        if (result === "stop") break
-        continue
-      }
+            messages: msgs,
+            parentID: lastUser.id,
+            sessionID: sessionID as any,
+            auto: task.auto,
+            overflow: task.overflow,
+          })
+         if (result === "stop") break
+         continue
+       }
 
-      // context overflow, needs compaction
-      if (
-        lastFinished &&
-        lastFinished.summary !== true &&
-        (await SessionCompaction.isOverflow({ tokens: lastFinished.tokens, model }))
-      ) {
-        await SessionCompaction.create({
-          sessionID,
-          agent: lastUser.agent,
-          model: currentUserModel,
-          auto: true,
-        })
+       // context overflow, needs compaction
+       if (
+         lastFinished &&
+         lastFinished.summary !== true &&
+         (await SessionCompaction.isOverflow({ tokens: lastFinished.tokens, model }))
+       ) {
+         await SessionCompaction.create({
+           sessionID: sessionID as any,
+           agent: lastUser.agent,
+           model: currentUserModel,
+           auto: true,
+         })
         continue
       }
 
@@ -566,37 +565,36 @@ export namespace SessionPrompt {
         session,
       })
 
-      const processor = await SessionProcessor.create({
-        assistantMessage: (await Session.updateMessage({
-          id: Identifier.ascending("message"),
-          parentID: lastUser.id,
-          role: "assistant",
-          mode: agent.name,
-          agent: agent.name,
-          variant: lastUser.variant,
-          path: {
-            cwd: Instance.directory,
-            root: Instance.worktree,
-          },
-          cost: 0,
-          tokens: {
-            input: 0,
-            output: 0,
-            reasoning: 0,
-            cache: { read: 0, write: 0 },
-          },
-          modelID: model.id,
-          providerID: model.providerID,
-          time: {
-            created: Date.now(),
-          },
-          sessionID,
-        })) as MessageV2.Assistant,
-        sessionID: sessionID,
-        model,
-        abort,
-      })
-      using _ = defer(() => InstructionPrompt.clear(processor.message.id))
+       const processor = await SessionProcessor.create({
+         assistantMessage: (await Session.updateMessage({
+           id: Identifier.ascending("message") as any,
+           parentID: lastUser.id,
+           role: "assistant",
+           mode: agent.name,
+           agent: agent.name,
+           variant: lastUser.variant,
+           path: {
+             cwd: Instance.directory,
+             root: Instance.worktree,
+           },
+           cost: 0,
+           tokens: {
+             input: 0,
+             output: 0,
+             reasoning: 0,
+             cache: { read: 0, write: 0 },
+           },
+           modelID: model.id as any,
+           providerID: model.providerID as any,
+           time: {
+             created: Date.now(),
+           },
+           sessionID: sessionID as any,
+         })) as MessageV2.Assistant,
+          sessionID: sessionID as any,
+          model,
+        })
+       using _ = defer(() => InstructionPrompt.clear(processor.message.id))
 
       // Check if user explicitly invoked an agent via @ in this turn
       const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
@@ -622,12 +620,12 @@ export namespace SessionPrompt {
         })
       }
 
-      if (step === 1) {
-        SessionSummary.summarize({
-          sessionID: sessionID,
-          messageID: lastUser.id,
-        })
-      }
+       if (step === 1) {
+         SessionSummary.summarize({
+           sessionID: sessionID as any,
+           messageID: lastUser.id,
+         })
+       }
 
       // Ephemerally wrap queued user messages with a reminder to stay on track
       if (step > 1 && lastFinished) {
@@ -660,7 +658,6 @@ export namespace SessionPrompt {
       const result = await processor.process({
         user: lastUser,
         agent,
-        abort,
         sessionID,
         system,
         messages: [
@@ -705,30 +702,30 @@ export namespace SessionPrompt {
 
       if (result === "stop") break
       if (result === "compact") {
-        await SessionCompaction.create({
-          sessionID,
-          agent: lastUser.agent,
-          model: currentUserModel,
-          auto: true,
-          overflow: !processor.message.finish,
-        })
-      }
-      continue
-    }
-    SessionCompaction.prune({ sessionID })
-    for await (const item of MessageV2.stream(sessionID)) {
-      if (item.info.role === "user") continue
-      const queued = state()[sessionID]?.callbacks ?? []
-      for (const q of queued) {
-        q.resolve(item)
-      }
-      return item
-    }
-    throw new Error("Impossible")
-  })
+       await SessionCompaction.create({
+           sessionID: sessionID as any,
+           agent: lastUser.agent,
+           model: currentUserModel,
+           auto: true,
+           overflow: !processor.message.finish,
+         })
+       }
+       continue
+     }
+     SessionCompaction.prune({ sessionID: sessionID as any })
+     for await (const item of MessageV2.stream(sessionID as any)) {
+       if (item.info.role === "user") continue
+       const queued = state()[sessionID]?.callbacks ?? []
+       for (const q of queued) {
+         q.resolve(item)
+       }
+       return item
+     }
+     throw new Error("Impossible")
+   })
 
-  async function lastModel(sessionID: string) {
-    for await (const item of MessageV2.stream(sessionID)) {
+   async function lastModel(sessionID: string) {
+     for await (const item of MessageV2.stream(sessionID as any)) {
       if (item.info.role === "user" && item.info.model) return item.info.model
     }
     return Provider.defaultModel()
@@ -740,52 +737,52 @@ export namespace SessionPrompt {
     model: Provider.Model
     session: Session.Info
     tools?: Record<string, boolean>
-    processor: SessionProcessor.Info
+    processor: any
     bypassAgentCheck: boolean
     messages: MessageV2.WithParts[]
   }) {
     using _ = log.time("resolveTools")
     const tools: Record<string, AITool> = {}
 
-    const context = (args: any, options: ToolCallOptions): Tool.Context => ({
-      sessionID: input.session.id,
-      abort: options.abortSignal!,
-      messageID: input.processor.message.id,
-      callID: options.toolCallId,
-      extra: { model: input.model, bypassAgentCheck: input.bypassAgentCheck },
-      agent: input.agent.name,
-      messages: input.messages,
-      metadata: async (val: { title?: string; metadata?: any }) => {
-        const match = input.processor.partFromToolCall(options.toolCallId)
-        if (match && match.state.status === "running") {
-          await Session.updatePart({
-            ...match,
-            state: {
-              title: val.title,
-              metadata: val.metadata,
-              status: "running",
-              input: args,
-              time: {
-                start: Date.now(),
-              },
-            },
-          })
-        }
-      },
-      async ask(req) {
-        await PermissionNext.ask({
-          ...req,
-          sessionID: input.session.id,
-          tool: { messageID: input.processor.message.id, callID: options.toolCallId },
-          ruleset: PermissionNext.merge(input.agent.permission, input.session.permission ?? []),
-        })
-      },
-    })
+     const context = (args: any, options: ToolCallOptions): Tool.Context => ({
+       sessionID: input.session.id as any,
+       abort: options.abortSignal!,
+       messageID: input.processor.message.id,
+       callID: options.toolCallId,
+       extra: { model: input.model, bypassAgentCheck: input.bypassAgentCheck },
+       agent: input.agent.name,
+       messages: input.messages,
+       metadata: async (val: { title?: string; metadata?: any }) => {
+         const match = input.processor.partFromToolCall(options.toolCallId)
+         if (match && match.state.status === "running") {
+           await Session.updatePart({
+             ...match,
+             state: {
+               title: val.title,
+               metadata: val.metadata,
+               status: "running",
+               input: args,
+               time: {
+                 start: Date.now(),
+               },
+             },
+           })
+         }
+       },
+       async ask(req) {
+         await PermissionNext.ask({
+           ...req,
+           sessionID: input.session.id as any,
+           tool: { messageID: input.processor.message.id, callID: options.toolCallId },
+           ruleset: PermissionNext.merge(input.agent.permission, input.session.permission ?? []),
+         })
+       },
+     })
 
-    for (const item of await ToolRegistry.tools(
-      { modelID: input.model.api.id, providerID: input.model.providerID },
-      input.agent,
-    )) {
+     for (const item of await ToolRegistry.tools(
+       { modelID: input.model.api.id as any, providerID: input.model.providerID as any },
+       input.agent,
+     )) {
       const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
       tools[item.id] = tool({
         id: item.id as any,
@@ -809,7 +806,7 @@ export namespace SessionPrompt {
             ...result,
             attachments: result.attachments?.map((attachment) => ({
               ...attachment,
-              id: Identifier.ascending("part"),
+              id: Identifier.ascending("part") as any,
               sessionID: ctx.sessionID,
               messageID: input.processor.message.id,
             })),
@@ -833,7 +830,9 @@ export namespace SessionPrompt {
       const execute = item.execute
       if (!execute) continue
 
-      const transformed = ProviderTransform.schema(input.model, asSchema(item.inputSchema).jsonSchema)
+      const transformedSchema = asSchema(item.inputSchema).jsonSchema
+      const resolvedSchema = transformedSchema instanceof Promise ? await transformedSchema : transformedSchema
+      const transformed = ProviderTransform.schema(input.model, resolvedSchema)
       item.inputSchema = jsonSchema(transformed)
       // Wrap execute to add plugin hooks and format output
       item.execute = async (args, opts) => {
@@ -912,7 +911,7 @@ export namespace SessionPrompt {
           output: truncated.content,
           attachments: attachments.map((attachment) => ({
             ...attachment,
-            id: Identifier.ascending("part"),
+            id: Identifier.ascending("part") as any,
             sessionID: ctx.sessionID,
             messageID: input.processor.message.id,
           })),
@@ -963,7 +962,7 @@ export namespace SessionPrompt {
       const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
       const error = new NamedError.Unknown({ message: `Agent not found: "${requested}".${hint}` })
       Bus.publish(Session.Event.Error, {
-        sessionID: input.sessionID,
+        sessionID: input.sessionID as any,
         error: error.toObject(),
       })
       throw error
@@ -976,27 +975,30 @@ export namespace SessionPrompt {
         : undefined
     const variant = input.variant ?? (agent.variant && full?.variants?.[agent.variant] ? agent.variant : undefined)
 
-    const info: MessageV2.Info = {
-      id: input.messageID ?? Identifier.ascending("message"),
-      role: "user",
-      sessionID: input.sessionID,
-      time: {
-        created: Date.now(),
-      },
-      tools: input.tools,
-      agent: agent.name,
-      model,
-      system: input.system,
-      format: input.format,
-      variant,
-    }
-    using _ = defer(() => InstructionPrompt.clear(info.id))
+     const info: MessageV2.Info = {
+       id: input.messageID ?? (Identifier.ascending("message") as any),
+       role: "user",
+       sessionID: input.sessionID as any,
+       time: {
+         created: Date.now(),
+       },
+       tools: input.tools,
+       agent: agent.name,
+       model: {
+         providerID: model.providerID as any,
+         modelID: model.modelID as any,
+       },
+       system: input.system,
+       format: input.format,
+       variant,
+     }
+     using _ = defer(() => InstructionPrompt.clear(info.id))
 
-    type Draft<T> = T extends MessageV2.Part ? Omit<T, "id"> & { id?: string } : never
-    const assign = (part: Draft<MessageV2.Part>): MessageV2.Part => ({
-      ...part,
-      id: part.id ?? Identifier.ascending("part"),
-    })
+     type Draft<T> = T extends MessageV2.Part ? Omit<T, "id"> & { id?: string } : never
+     const assign = (part: Draft<MessageV2.Part>): MessageV2.Part => ({
+       ...part,
+       id: part.id ?? (Identifier.ascending("part") as any),
+     })
 
     const parts = await Promise.all(
       input.parts.map(async (part): Promise<Draft<MessageV2.Part>[]> => {
@@ -1009,7 +1011,7 @@ export namespace SessionPrompt {
             const pieces: Draft<MessageV2.Part>[] = [
               {
                 messageID: info.id,
-                sessionID: input.sessionID,
+                sessionID: input.sessionID as any,
                 type: "text",
                 synthetic: true,
                 text: `Reading MCP resource: ${part.filename} (${uri})`,
@@ -1031,7 +1033,7 @@ export namespace SessionPrompt {
                 if ("text" in content && content.text) {
                   pieces.push({
                     messageID: info.id,
-                    sessionID: input.sessionID,
+                    sessionID: input.sessionID as any,
                     type: "text",
                     synthetic: true,
                     text: content.text as string,
@@ -1041,7 +1043,7 @@ export namespace SessionPrompt {
                   const mimeType = "mimeType" in content ? content.mimeType : part.mime
                   pieces.push({
                     messageID: info.id,
-                    sessionID: input.sessionID,
+                    sessionID: input.sessionID as any,
                     type: "text",
                     synthetic: true,
                     text: `[Binary content: ${mimeType}]`,
@@ -1052,14 +1054,14 @@ export namespace SessionPrompt {
               pieces.push({
                 ...part,
                 messageID: info.id,
-                sessionID: input.sessionID,
+                sessionID: input.sessionID as any,
               })
             } catch (error: unknown) {
               log.error("failed to read MCP resource", { error, clientName, uri })
               const message = error instanceof Error ? error.message : String(error)
               pieces.push({
                 messageID: info.id,
-                sessionID: input.sessionID,
+                sessionID: input.sessionID as any,
                 type: "text",
                 synthetic: true,
                 text: `Failed to read MCP resource ${part.filename}: ${message}`,
@@ -1075,14 +1077,14 @@ export namespace SessionPrompt {
                 return [
                   {
                     messageID: info.id,
-                    sessionID: input.sessionID,
+                    sessionID: input.sessionID as any,
                     type: "text",
                     synthetic: true,
                     text: `Called the Read tool with the following input: ${JSON.stringify({ filePath: part.filename })}`,
                   },
                   {
                     messageID: info.id,
-                    sessionID: input.sessionID,
+                    sessionID: input.sessionID as any,
                     type: "text",
                     synthetic: true,
                     text: Buffer.from(part.url, "base64url").toString(),
@@ -1090,7 +1092,7 @@ export namespace SessionPrompt {
                   {
                     ...part,
                     messageID: info.id,
-                    sessionID: input.sessionID,
+                    sessionID: input.sessionID as any,
                   },
                 ]
               }
@@ -1146,7 +1148,7 @@ export namespace SessionPrompt {
                 const pieces: Draft<MessageV2.Part>[] = [
                   {
                     messageID: info.id,
-                    sessionID: input.sessionID,
+                    sessionID: input.sessionID as any,
                     type: "text",
                     synthetic: true,
                     text: `Called the Read tool with the following input: ${JSON.stringify(args)}`,
@@ -1157,7 +1159,7 @@ export namespace SessionPrompt {
                   .then(async (t) => {
                     const model = await Provider.getModel(info.model.providerID, info.model.modelID)
                     const readCtx: Tool.Context = {
-                      sessionID: input.sessionID,
+                      sessionID: input.sessionID as any,
                       abort: new AbortController().signal,
                       agent: input.agent!,
                       messageID: info.id,
@@ -1169,7 +1171,7 @@ export namespace SessionPrompt {
                     const result = await t.execute(args, readCtx)
                     pieces.push({
                       messageID: info.id,
-                      sessionID: input.sessionID,
+                      sessionID: input.sessionID as any,
                       type: "text",
                       synthetic: true,
                       text: result.output,
@@ -1181,14 +1183,14 @@ export namespace SessionPrompt {
                           synthetic: true,
                           filename: attachment.filename ?? part.filename,
                           messageID: info.id,
-                          sessionID: input.sessionID,
+                          sessionID: input.sessionID as any,
                         })),
                       )
                     } else {
                       pieces.push({
                         ...part,
                         messageID: info.id,
-                        sessionID: input.sessionID,
+                        sessionID: input.sessionID as any,
                       })
                     }
                   })
@@ -1196,14 +1198,14 @@ export namespace SessionPrompt {
                     log.error("failed to read file", { error })
                     const message = error instanceof Error ? error.message : error.toString()
                     Bus.publish(Session.Event.Error, {
-                      sessionID: input.sessionID,
+                      sessionID: input.sessionID as any,
                       error: new NamedError.Unknown({
                         message,
                       }).toObject(),
                     })
                     pieces.push({
                       messageID: info.id,
-                      sessionID: input.sessionID,
+                      sessionID: input.sessionID as any,
                       type: "text",
                       synthetic: true,
                       text: `Read tool failed to read ${filepath} with the following error: ${message}`,
@@ -1216,7 +1218,7 @@ export namespace SessionPrompt {
               if (part.mime === "application/x-directory") {
                 const args = { filePath: filepath }
                 const listCtx: Tool.Context = {
-                  sessionID: input.sessionID,
+                  sessionID: input.sessionID as any,
                   abort: new AbortController().signal,
                   agent: input.agent!,
                   messageID: info.id,
@@ -1229,14 +1231,14 @@ export namespace SessionPrompt {
                 return [
                   {
                     messageID: info.id,
-                    sessionID: input.sessionID,
+                    sessionID: input.sessionID as any,
                     type: "text",
                     synthetic: true,
                     text: `Called the Read tool with the following input: ${JSON.stringify(args)}`,
                   },
                   {
                     messageID: info.id,
-                    sessionID: input.sessionID,
+                    sessionID: input.sessionID as any,
                     type: "text",
                     synthetic: true,
                     text: result.output,
@@ -1244,16 +1246,16 @@ export namespace SessionPrompt {
                   {
                     ...part,
                     messageID: info.id,
-                    sessionID: input.sessionID,
+                    sessionID: input.sessionID as any,
                   },
                 ]
               }
 
-              FileTime.read(input.sessionID, filepath)
+               FileTime.read(input.sessionID as any, filepath)
               return [
                 {
                   messageID: info.id,
-                  sessionID: input.sessionID,
+                  sessionID: input.sessionID as any,
                   type: "text",
                   text: `Called the Read tool with the following input: {"filePath":"${filepath}"}`,
                   synthetic: true,
@@ -1261,7 +1263,7 @@ export namespace SessionPrompt {
                 {
                   id: part.id,
                   messageID: info.id,
-                  sessionID: input.sessionID,
+                  sessionID: input.sessionID as any,
                   type: "file",
                   url: `data:${part.mime};base64,` + (await Filesystem.readBytes(filepath)).toString("base64"),
                   mime: part.mime,
@@ -1280,11 +1282,11 @@ export namespace SessionPrompt {
             {
               ...part,
               messageID: info.id,
-              sessionID: input.sessionID,
+              sessionID: input.sessionID as any,
             },
             {
               messageID: info.id,
-              sessionID: input.sessionID,
+              sessionID: input.sessionID as any,
               type: "text",
               synthetic: true,
               // An extra space is added here. Otherwise the 'Use' gets appended
@@ -1301,7 +1303,7 @@ export namespace SessionPrompt {
           {
             ...part,
             messageID: info.id,
-            sessionID: input.sessionID,
+            sessionID: input.sessionID as any,
           },
         ]
       }),
@@ -1310,7 +1312,7 @@ export namespace SessionPrompt {
     await Plugin.trigger(
       "chat.message",
       {
-        sessionID: input.sessionID,
+        sessionID: input.sessionID as any,
         agent: input.agent,
         model: input.model,
         messageID: input.messageID,
@@ -1341,7 +1343,7 @@ export namespace SessionPrompt {
     if (!Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE) {
       if (input.agent.name === "plan") {
         userMessage.parts.push({
-          id: Identifier.ascending("part"),
+          id: Identifier.ascending("part") as any,
           messageID: userMessage.info.id,
           sessionID: userMessage.info.sessionID,
           type: "text",
@@ -1352,7 +1354,7 @@ export namespace SessionPrompt {
       const wasPlan = input.messages.some((msg) => msg.info.role === "assistant" && msg.info.agent === "plan")
       if (wasPlan && input.agent.name === "build") {
         userMessage.parts.push({
-          id: Identifier.ascending("part"),
+          id: Identifier.ascending("part") as any,
           messageID: userMessage.info.id,
           sessionID: userMessage.info.sessionID,
           type: "text",
@@ -1372,7 +1374,7 @@ export namespace SessionPrompt {
       const exists = await Filesystem.exists(plan)
       if (exists) {
         const part = await Session.updatePart({
-          id: Identifier.ascending("part"),
+          id: Identifier.ascending("part") as any,
           messageID: userMessage.info.id,
           sessionID: userMessage.info.sessionID,
           type: "text",
@@ -1391,7 +1393,7 @@ export namespace SessionPrompt {
       const exists = await Filesystem.exists(plan)
       if (!exists) await fs.mkdir(path.dirname(plan), { recursive: true })
       const part = await Session.updatePart({
-        id: Identifier.ascending("part"),
+        id: Identifier.ascending("part") as any,
         messageID: userMessage.info.id,
         sessionID: userMessage.info.sessionID,
         type: "text",
@@ -1511,32 +1513,32 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     const agent = await Agent.get(input.agent)
     const model = input.model ?? agent.model ?? (await lastModel(input.sessionID))
     const userMsg: MessageV2.User = {
-      id: Identifier.ascending("message"),
-      sessionID: input.sessionID,
+      id: Identifier.ascending("message") as any,
+      sessionID: input.sessionID as any,
       time: {
         created: Date.now(),
       },
       role: "user",
       agent: input.agent,
-      model: {
-        providerID: model.providerID,
-        modelID: model.modelID,
-      },
+       model: {
+         providerID: model.providerID as any,
+         modelID: model.modelID as any,
+       },
     }
     await Session.updateMessage(userMsg)
     const userPart: MessageV2.Part = {
       type: "text",
-      id: Identifier.ascending("part"),
+      id: Identifier.ascending("part") as any,
       messageID: userMsg.id,
-      sessionID: input.sessionID,
+      sessionID: input.sessionID as any,
       text: "The following tool was executed by the user",
       synthetic: true,
     }
     await Session.updatePart(userPart)
 
     const msg: MessageV2.Assistant = {
-      id: Identifier.ascending("message"),
-      sessionID: input.sessionID,
+      id: Identifier.ascending("message") as any,
+      sessionID: input.sessionID as any,
       parentID: userMsg.id,
       mode: input.agent,
       agent: input.agent,
@@ -1555,15 +1557,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         reasoning: 0,
         cache: { read: 0, write: 0 },
       },
-      modelID: model.modelID,
-      providerID: model.providerID,
+       modelID: model.modelID as any,
+       providerID: model.providerID as any,
     }
     await Session.updateMessage(msg)
     const part: MessageV2.Part = {
       type: "tool",
-      id: Identifier.ascending("part"),
+      id: Identifier.ascending("part") as any,
       messageID: msg.id,
-      sessionID: input.sessionID,
+      sessionID: input.sessionID as any,
       tool: "bash",
       callID: ulid(),
       state: {
@@ -1759,6 +1761,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
   export async function command(input: CommandInput) {
     log.info("command", input)
     const command = await Command.get(input.command)
+    if (!command) throw new Error(`Command not found: ${input.command}`)
     const agentName = command.agent ?? input.agent ?? (await Agent.defaultAgent())
 
     const raw = input.arguments.match(argsRegex) ?? []
@@ -1827,7 +1830,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const { providerID, modelID, suggestions } = e.data
         const hint = suggestions?.length ? ` Did you mean: ${suggestions.join(", ")}?` : ""
         Bus.publish(Session.Event.Error, {
-          sessionID: input.sessionID,
+          sessionID: input.sessionID as any,
           error: new NamedError.Unknown({ message: `Model not found: ${providerID}/${modelID}.${hint}` }).toObject(),
         })
       }
@@ -1839,7 +1842,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
       const error = new NamedError.Unknown({ message: `Agent not found: "${agentName}".${hint}` })
       Bus.publish(Session.Event.Error, {
-        sessionID: input.sessionID,
+        sessionID: input.sessionID as any,
         error: error.toObject(),
       })
       throw error
@@ -1847,22 +1850,22 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
     const templateParts = await resolvePromptParts(template)
     const isSubtask = (agent.mode === "subagent" && command.subtask !== false) || command.subtask === true
-    const parts = isSubtask
-      ? [
-          {
-            type: "subtask" as const,
-            agent: agent.name,
-            description: command.description ?? "",
-            command: input.command,
-            model: {
-              providerID: taskModel.providerID,
-              modelID: taskModel.modelID,
-            },
-            // TODO: how can we make task tool accept a more complex input?
-            prompt: templateParts.find((y) => y.type === "text")?.text ?? "",
-          },
-        ]
-      : [...templateParts, ...(input.parts ?? [])]
+     const parts = isSubtask
+       ? [
+           {
+             type: "subtask" as const,
+             agent: agent.name,
+             description: command.description ?? "",
+             command: input.command,
+             model: {
+               providerID: taskModel.providerID as any,
+               modelID: taskModel.modelID as any,
+             },
+             // TODO: how can we make task tool accept a more complex input?
+             prompt: templateParts.find((y) => y.type === "text")?.text ?? "",
+           },
+         ]
+       : [...templateParts, ...(input.parts ?? [])]
 
     const userAgent = isSubtask ? (input.agent ?? (await Agent.defaultAgent())) : agentName
     const userModel = isSubtask
@@ -1875,14 +1878,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       "command.execute.before",
       {
         command: input.command,
-        sessionID: input.sessionID,
+        sessionID: input.sessionID as any,
         arguments: input.arguments,
       },
       { parts },
     )
 
     const result = (await prompt({
-      sessionID: input.sessionID,
+      sessionID: input.sessionID as any,
       messageID: input.messageID,
       model: userModel,
       agent: userAgent,
@@ -1892,7 +1895,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
     Bus.publish(Command.Event.Executed, {
       name: input.command,
-      sessionID: input.sessionID,
+      sessionID: input.sessionID as any,
       arguments: input.arguments,
       messageID: result.info.id,
     })
@@ -1958,7 +1961,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           : await MessageV2.toModelMessages(contextMessages, model)),
       ],
     })
-    const text = await result.text.catch((err) => log.error("failed to generate title", { error: err }))
+    const text = await Promise.resolve(result.text).catch((err: unknown) => log.error("failed to generate title", { error: err }))
     if (text) {
       const cleaned = text
         .replace(/<think>[\s\S]*?<\/think>\s*/g, "")

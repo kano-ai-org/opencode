@@ -91,10 +91,10 @@ describe("session.prompt missing file", () => {
 
         if (msg.info.role !== "user") throw new Error("expected user message")
 
-        const stored = await MessageV2.get({
-          sessionID: session.id,
-          messageID: msg.info.id,
-        })
+         const stored = await MessageV2.get({
+           sessionID: session.id as any,
+           messageID: msg.info.id,
+         })
         const text = stored.parts.filter((part) => part.type === "text").map((part) => part.text)
 
         expect(text[0]?.startsWith("Called the Read tool with the following input:")).toBe(true)
@@ -136,7 +136,7 @@ describe("session.prompt special characters", () => {
           parts,
           noReply: true,
         })
-        const stored = await MessageV2.get({ sessionID: session.id, messageID: message.info.id })
+        const stored = await MessageV2.get({ sessionID: session.id as any, messageID: message.info.id })
         const textParts = stored.parts.filter((part) => part.type === "text")
         const hasContent = textParts.some((part) => part.text.includes("special content"))
         expect(hasContent).toBe(true)
@@ -187,7 +187,7 @@ describe("session.prompt agent variant", () => {
             parts: [{ type: "text", text: "hello again" }],
           })
           if (match.info.role !== "user") throw new Error("expected user message")
-          expect(match.info.model).toEqual({ providerID: "openai", modelID: "gpt-5.2" })
+           expect(match.info.model).toEqual({ providerID: "openai" as any, modelID: "gpt-5.2" as any })
           expect(match.info.variant).toBe("xhigh")
 
           const override = await SessionPrompt.prompt({

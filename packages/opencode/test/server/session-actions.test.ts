@@ -35,22 +35,22 @@ async function user(sessionID: SessionID, text: string) {
 }
 
 describe("session action routes", () => {
-  test("abort route calls SessionPrompt.cancel", async () => {
+   test("abort route calls SessionPrompt.cancel", async () => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const session = await Session.create({})
-        const cancel = spyOn(SessionPrompt, "cancel").mockResolvedValue()
-        const app = Server.Default()
+         const session = await Session.create({})
+         const cancel = spyOn(SessionPrompt, "cancel" as any).mockResolvedValue(undefined)
+         const app = Server.App()
 
-        const res = await app.request(`/session/${session.id}/abort`, {
-          method: "POST",
-        })
+         const res = await app.request(`/session/${session.id}/abort`, {
+           method: "POST",
+         })
 
-        expect(res.status).toBe(200)
-        expect(await res.json()).toBe(true)
-        expect(cancel).toHaveBeenCalledWith(session.id)
+         expect(res.status).toBe(200)
+         expect(await res.json()).toBe(true)
+         expect(cancel).toHaveBeenCalledWith(session.id)
 
         await Session.remove(session.id)
       },
@@ -62,11 +62,11 @@ describe("session action routes", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const session = await Session.create({})
-        const msg = await user(session.id, "hello")
-        const busy = spyOn(SessionPrompt, "assertNotBusy").mockRejectedValue(new Session.BusyError(session.id))
-        const remove = spyOn(Session, "removeMessage").mockResolvedValue(msg.id)
-        const app = Server.Default()
+         const session = await Session.create({})
+         const msg = await user(session.id as any, "hello")
+         const busy = spyOn(SessionPrompt, "assertNotBusy" as any).mockRejectedValue(new Session.BusyError(session.id as any))
+         const remove = spyOn(Session, "removeMessage").mockResolvedValue(msg.id)
+         const app = Server.App()
 
         const res = await app.request(`/session/${session.id}/message/${msg.id}`, {
           method: "DELETE",

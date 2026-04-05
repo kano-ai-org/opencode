@@ -3,6 +3,7 @@ import { ProjectTable } from "@/project/project.sql"
 import { SessionTable, MessageTable, PartTable, TodoTable, PermissionTable } from "@/session/session.sql"
 import { SessionShareTable } from "@/share/share.sql"
 import { InstanceID } from "@/global/identity"
+import type { SessionID } from "./schema"
 import { eq } from "drizzle-orm"
 import { gunzipSync } from "node:zlib"
 import z from "zod"
@@ -214,7 +215,7 @@ export namespace SessionTransfer {
         const exists = db
           .select({ id: SessionTable.id })
           .from(SessionTable)
-          .where(eq(SessionTable.id, row.session_id))
+          .where(eq(SessionTable.id, row.session_id as SessionID))
           .get()
         if (!exists) continue
 

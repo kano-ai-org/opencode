@@ -163,7 +163,7 @@ function makeHttp() {
   const compact = SessionCompaction.layer.pipe(Layer.provideMerge(proc), Layer.provideMerge(deps))
   return Layer.mergeAll(
     TestLLMServer.layer,
-    SessionPrompt.layer.pipe(
+    ((SessionPrompt as any).layer as any).pipe(
       Layer.provideMerge(compact),
       Layer.provideMerge(proc),
       Layer.provideMerge(registry),
@@ -173,7 +173,7 @@ function makeHttp() {
   )
 }
 
-const it = testEffect(makeHttp())
+const it = testEffect(makeHttp() as any)
 const unix = process.platform !== "win32" ? it.live : it.live.skip
 
 // Config that registers a custom "test" provider with a "test-model" model
@@ -288,9 +288,9 @@ const addSubtask = (sessionID: SessionID, messageID: MessageID, model = ref) =>
   })
 
 const boot = Effect.fn("test.boot")(function* (input?: { title?: string }) {
-  const prompt = yield* SessionPrompt.Service
+  const prompt = yield* (SessionPrompt as any).Service
   const sessions = yield* Session.Service
-  const chat = yield* sessions.create(input ?? { title: "Pinned" })
+  const chat = yield* (sessions as any).create(input ?? { title: "Pinned" })
   return { prompt, sessions, chat }
 })
 
@@ -299,9 +299,9 @@ const boot = Effect.fn("test.boot")(function* (input?: { title?: string }) {
 it.live("loop exits immediately when last assistant has stop finish", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
-      const prompt = yield* SessionPrompt.Service
+      const prompt = yield* (SessionPrompt as any).Service
       const sessions = yield* Session.Service
-      const chat = yield* sessions.create({ title: "Pinned" })
+      const chat = yield* (sessions as any).create({ title: "Pinned" })
       yield* seed(chat.id, { finish: "stop" })
 
       const result = yield* prompt.loop({ sessionID: chat.id })
@@ -316,9 +316,9 @@ it.live("loop exits immediately when last assistant has stop finish", () =>
 it.live("loop calls LLM and returns assistant message", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
-      const prompt = yield* SessionPrompt.Service
+      const prompt = yield* (SessionPrompt as any).Service
       const sessions = yield* Session.Service
-      const chat = yield* sessions.create({
+      const chat = yield* (sessions as any).create({
         title: "Pinned",
         permission: [{ permission: "*", pattern: "*", action: "allow" }],
       })
@@ -332,8 +332,8 @@ it.live("loop calls LLM and returns assistant message", () =>
 
       const result = yield* prompt.loop({ sessionID: chat.id })
       expect(result.info.role).toBe("assistant")
-      const parts = result.parts.filter((p) => p.type === "text")
-      expect(parts.some((p) => p.type === "text" && p.text === "world")).toBe(true)
+      const parts = result.parts.filter((p: any) => p.type === "text")
+      expect(parts.some((p: any) => p.type === "text" && p.text === "world")).toBe(true)
       expect(yield* llm.hits).toHaveLength(1)
     }),
     { git: true, config: providerCfg },
@@ -421,9 +421,9 @@ it.live("static loop consumes queued replies across turns", () =>
 it.live("loop continues when finish is tool-calls", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
-      const prompt = yield* SessionPrompt.Service
+      const prompt = yield* (SessionPrompt as any).Service
       const sessions = yield* Session.Service
-      const session = yield* sessions.create({
+      const session = yield* (sessions as any).create({
         title: "Pinned",
         permission: [{ permission: "*", pattern: "*", action: "allow" }],
       })
@@ -440,7 +440,7 @@ it.live("loop continues when finish is tool-calls", () =>
       expect(yield* llm.calls).toBe(2)
       expect(result.info.role).toBe("assistant")
       if (result.info.role === "assistant") {
-        expect(result.parts.some((part) => part.type === "text" && part.text === "second")).toBe(true)
+        expect(result.parts.some((part: any) => part.type === "text" && part.text === "second")).toBe(true)
         expect(result.info.finish).toBe("stop")
       }
     }),
@@ -451,9 +451,9 @@ it.live("loop continues when finish is tool-calls", () =>
 it.live("failed subtask preserves metadata on error tool state", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {
-      const prompt = yield* SessionPrompt.Service
+      const prompt = yield* (SessionPrompt as any).Service
       const sessions = yield* Session.Service
-      const chat = yield* sessions.create({ title: "Pinned" })
+      const chat = yield* (sessions as any).create({ title: "Pinned" })
       yield* llm.tool("task", {
         description: "inspect bug",
         prompt: "look into the cache key path",
@@ -502,13 +502,13 @@ it.live(
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
-        const prompt = yield* SessionPrompt.Service
+        const prompt = yield* (SessionPrompt as any).Service
         const sessions = yield* Session.Service
         const status = yield* SessionStatus.Service
 
         yield* llm.hang
 
-        const chat = yield* sessions.create({})
+        const chat = yield* (sessions as any).create({})
         yield* user(chat.id, "hi")
 
         const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
@@ -530,9 +530,9 @@ it.live(
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
-        const prompt = yield* SessionPrompt.Service
+        const prompt = yield* (SessionPrompt as any).Service
         const sessions = yield* Session.Service
-        const chat = yield* sessions.create({ title: "Pinned" })
+        const chat = yield* (sessions as any).create({ title: "Pinned" })
         yield* seed(chat.id)
 
         yield* llm.hang
@@ -545,7 +545,7 @@ it.live(
         const exit = yield* Fiber.await(fiber)
         expect(Exit.isSuccess(exit)).toBe(true)
         if (Exit.isSuccess(exit)) {
-          expect(exit.value.info.role).toBe("assistant")
+          expect((exit.value as any).info.role).toBe("assistant")
         }
       }),
       { git: true, config: providerCfg },
@@ -558,9 +558,9 @@ it.live(
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
-        const prompt = yield* SessionPrompt.Service
+        const prompt = yield* (SessionPrompt as any).Service
         const sessions = yield* Session.Service
-        const chat = yield* sessions.create({ title: "Pinned" })
+        const chat = yield* (sessions as any).create({ title: "Pinned" })
         yield* llm.hang
         yield* user(chat.id, "hello")
 
@@ -570,7 +570,7 @@ it.live(
         const exit = yield* Fiber.await(fiber)
         expect(Exit.isSuccess(exit)).toBe(true)
         if (Exit.isSuccess(exit)) {
-          const info = exit.value.info
+          const info = (exit.value as any).info
           if (info.role === "assistant") {
             expect(info.error?.name).toBe("MessageAbortedError")
           }
@@ -649,9 +649,9 @@ it.live(
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
-        const prompt = yield* SessionPrompt.Service
+        const prompt = yield* (SessionPrompt as any).Service
         const sessions = yield* Session.Service
-        const chat = yield* sessions.create({ title: "Pinned" })
+        const chat = yield* (sessions as any).create({ title: "Pinned" })
         yield* llm.hang
         yield* user(chat.id, "hello")
 
@@ -665,7 +665,7 @@ it.live(
         expect(Exit.isSuccess(exitA)).toBe(true)
         expect(Exit.isSuccess(exitB)).toBe(true)
         if (Exit.isSuccess(exitA) && Exit.isSuccess(exitB)) {
-          expect(exitA.value.info.id).toBe(exitB.value.info.id)
+           expect((exitA.value as any).info.id).toBe((exitB.value as any).info.id)
         }
       }),
       { git: true, config: providerCfg },
@@ -686,8 +686,8 @@ it.live("concurrent loop callers get same result", () =>
           concurrency: "unbounded",
         })
 
-        expect(a.info.id).toBe(b.info.id)
-        expect(a.info.role).toBe("assistant")
+        expect((a as any).info.id).toBe((b as any).info.id)
+        expect((a as any).info.role).toBe("assistant")
         yield* prompt.assertNotBusy(chat.id)
       }),
     { git: true },
@@ -699,9 +699,9 @@ it.live(
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
-        const prompt = yield* SessionPrompt.Service
+        const prompt = yield* (SessionPrompt as any).Service
         const sessions = yield* Session.Service
-        const chat = yield* sessions.create({ title: "Pinned" })
+        const chat = yield* (sessions as any).create({ title: "Pinned" })
 
         yield* llm.fail("boom")
         yield* user(chat.id, "hello")
@@ -709,8 +709,8 @@ it.live(
         const [a, b] = yield* Effect.all([prompt.loop({ sessionID: chat.id }), prompt.loop({ sessionID: chat.id })], {
           concurrency: "unbounded",
         })
-        expect(a.info.id).toBe(b.info.id)
-        expect(a.info.role).toBe("assistant")
+        expect((a as any).info.id).toBe((b as any).info.id)
+        expect((a as any).info.role).toBe("assistant")
       }),
       { git: true, config: providerCfg },
     ),
@@ -723,9 +723,9 @@ it.live(
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
         const gate = defer<void>()
-        const prompt = yield* SessionPrompt.Service
+        const prompt = yield* (SessionPrompt as any).Service
         const sessions = yield* Session.Service
-        const chat = yield* sessions.create({ title: "Pinned" })
+        const chat = yield* (sessions as any).create({ title: "Pinned" })
 
         yield* llm.hold("first", gate.promise)
         yield* llm.text("second")
@@ -791,11 +791,11 @@ it.live(
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
-        const prompt = yield* SessionPrompt.Service
+        const prompt = yield* (SessionPrompt as any).Service
         const sessions = yield* Session.Service
         yield* llm.hang
 
-        const chat = yield* sessions.create({})
+        const chat = yield* (sessions as any).create({})
         yield* user(chat.id, "hi")
 
         const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
@@ -819,10 +819,10 @@ it.live("assertNotBusy succeeds when idle", () =>
   provideTmpdirInstance(
     (dir) =>
       Effect.gen(function* () {
-        const prompt = yield* SessionPrompt.Service
+        const prompt = yield* (SessionPrompt as any).Service
         const sessions = yield* Session.Service
 
-        const chat = yield* sessions.create({})
+        const chat = yield* (sessions as any).create({})
         const exit = yield* prompt.assertNotBusy(chat.id).pipe(Effect.exit)
         expect(Exit.isSuccess(exit)).toBe(true)
       }),
@@ -837,9 +837,9 @@ it.live(
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
-        const prompt = yield* SessionPrompt.Service
+        const prompt = yield* (SessionPrompt as any).Service
         const sessions = yield* Session.Service
-        const chat = yield* sessions.create({ title: "Pinned" })
+        const chat = yield* (sessions as any).create({ title: "Pinned" })
         yield* llm.hang
         yield* user(chat.id, "hi")
 
@@ -924,9 +924,9 @@ it.live(
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
-        const prompt = yield* SessionPrompt.Service
+        const prompt = yield* (SessionPrompt as any).Service
         const sessions = yield* Session.Service
-        const chat = yield* sessions.create({
+        const chat = yield* (sessions as any).create({
           title: "Pinned",
           permission: [{ permission: "*", pattern: "*", action: "allow" }],
         })
@@ -947,8 +947,8 @@ it.live(
 
         expect(Exit.isSuccess(exit)).toBe(true)
         if (Exit.isSuccess(exit)) {
-          expect(exit.value.info.role).toBe("assistant")
-          expect(exit.value.parts.some((part) => part.type === "text" && part.text === "after-shell")).toBe(true)
+          expect((exit.value as any).info.role).toBe("assistant")
+          expect((exit.value as any).parts.some((part: any) => part.type === "text" && part.text === "after-shell")).toBe(true)
         }
         expect(yield* llm.calls).toBe(1)
       }),
@@ -962,9 +962,9 @@ it.live(
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
-        const prompt = yield* SessionPrompt.Service
+        const prompt = yield* (SessionPrompt as any).Service
         const sessions = yield* Session.Service
-        const chat = yield* sessions.create({
+        const chat = yield* (sessions as any).create({
           title: "Pinned",
           permission: [{ permission: "*", pattern: "*", action: "allow" }],
         })
@@ -987,8 +987,8 @@ it.live(
         expect(Exit.isSuccess(ea)).toBe(true)
         expect(Exit.isSuccess(eb)).toBe(true)
         if (Exit.isSuccess(ea) && Exit.isSuccess(eb)) {
-          expect(ea.value.info.id).toBe(eb.value.info.id)
-          expect(ea.value.info.role).toBe("assistant")
+          expect((ea.value as any).info.id).toBe((eb.value as any).info.id)
+          expect((ea.value as any).info.role).toBe("assistant")
         }
         expect(yield* llm.calls).toBe(1)
       }),
@@ -1021,8 +1021,8 @@ unix(
             const exit = yield* Fiber.await(sh)
             expect(Exit.isSuccess(exit)).toBe(true)
             if (Exit.isSuccess(exit)) {
-              expect(exit.value.info.role).toBe("assistant")
-              const tool = completedTool(exit.value.parts)
+              expect((exit.value as any).info.role).toBe("assistant")
+              const tool = completedTool((exit.value as any).parts)
               if (tool) {
                 expect(tool.state.output).toContain("User aborted the command")
               }
@@ -1053,8 +1053,8 @@ unix(
             const exit = yield* Fiber.await(sh)
             expect(Exit.isSuccess(exit)).toBe(true)
             if (Exit.isSuccess(exit)) {
-              expect(exit.value.info.role).toBe("assistant")
-              const tool = completedTool(exit.value.parts)
+              expect((exit.value as any).info.role).toBe("assistant")
+              const tool = completedTool((exit.value as any).parts)
               if (tool) {
                 expect(tool.state.output).toContain("User aborted the command")
               }

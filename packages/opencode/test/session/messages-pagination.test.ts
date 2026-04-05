@@ -41,20 +41,20 @@ describe("session message pagination", () => {
       directory: root,
       fn: async () => {
         const session = await Session.create({})
-        const ids = await fill(session.id, 6)
+        const ids = await fill(session.id as any, 6)
 
-        const a = await MessageV2.page({ sessionID: session.id, limit: 2 })
+        const a = await MessageV2.page({ sessionID: session.id as any, limit: 2 })
         expect(a.items.map((item) => item.info.id)).toEqual(ids.slice(-2))
         expect(a.items.every((item) => item.parts.length === 1)).toBe(true)
         expect(a.more).toBe(true)
         expect(a.cursor).toBeTruthy()
 
-        const b = await MessageV2.page({ sessionID: session.id, limit: 2, before: a.cursor! })
+        const b = await MessageV2.page({ sessionID: session.id as any, limit: 2, before: a.cursor! })
         expect(b.items.map((item) => item.info.id)).toEqual(ids.slice(-4, -2))
         expect(b.more).toBe(true)
         expect(b.cursor).toBeTruthy()
 
-        const c = await MessageV2.page({ sessionID: session.id, limit: 2, before: b.cursor! })
+        const c = await MessageV2.page({ sessionID: session.id as any, limit: 2, before: b.cursor! })
         expect(c.items.map((item) => item.info.id)).toEqual(ids.slice(0, 2))
         expect(c.more).toBe(false)
         expect(c.cursor).toBeUndefined()
@@ -69,9 +69,9 @@ describe("session message pagination", () => {
       directory: root,
       fn: async () => {
         const session = await Session.create({})
-        const ids = await fill(session.id, 5)
+        const ids = await fill(session.id as any, 5)
 
-        const items = await Array.fromAsync(MessageV2.stream(session.id))
+        const items = await Array.fromAsync(MessageV2.stream(session.id as any))
         expect(items.map((item) => item.info.id)).toEqual(ids.slice().reverse())
 
         await Session.remove(session.id)
@@ -84,10 +84,10 @@ describe("session message pagination", () => {
       directory: root,
       fn: async () => {
         const session = await Session.create({})
-        const ids = await fill(session.id, 4, (i) => 1000.5 + i)
+        const ids = await fill(session.id as any, 4, (i) => 1000.5 + i)
 
-        const a = await MessageV2.page({ sessionID: session.id, limit: 2 })
-        const b = await MessageV2.page({ sessionID: session.id, limit: 2, before: a.cursor! })
+        const a = await MessageV2.page({ sessionID: session.id as any, limit: 2 })
+        const b = await MessageV2.page({ sessionID: session.id as any, limit: 2, before: a.cursor! })
 
         expect(a.items.map((item) => item.info.id)).toEqual(ids.slice(-2))
         expect(b.items.map((item) => item.info.id)).toEqual(ids.slice(0, 2))
@@ -97,15 +97,15 @@ describe("session message pagination", () => {
     })
   })
 
-  test("scopes get by session id", async () => {
-    await Instance.provide({
-      directory: root,
-      fn: async () => {
-        const a = await Session.create({})
-        const b = await Session.create({})
-        const [id] = await fill(a.id, 1)
+   test("scopes get by session id", async () => {
+     await Instance.provide({
+       directory: root,
+       fn: async () => {
+         const a = await Session.create({})
+         const b = await Session.create({})
+         const [id] = await fill(a.id as any, 1)
 
-        await expect(MessageV2.get({ sessionID: b.id, messageID: id })).rejects.toMatchObject({ name: "NotFoundError" })
+         await expect(MessageV2.get({ sessionID: b.id as any, messageID: id })).rejects.toMatchObject({ name: "NotFoundError" })
 
         await Session.remove(a.id)
         await Session.remove(b.id)

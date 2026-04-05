@@ -28,7 +28,7 @@ import { createVertex } from "@ai-sdk/google-vertex"
 import { createVertexAnthropic } from "@ai-sdk/google-vertex/anthropic"
 import { createOpenAI } from "@ai-sdk/openai"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
-import { createOpenRouter, type LanguageModelV2 } from "@openrouter/ai-sdk-provider"
+import { createOpenRouter, type LanguageModelV3 } from "@openrouter/ai-sdk-provider"
 import { createOpenaiCompatible as createGitHubCopilotOpenAICompatible } from "./sdk/copilot"
 import { createXai } from "@ai-sdk/xai"
 import { createMistral } from "@ai-sdk/mistral"
@@ -102,7 +102,12 @@ export namespace Provider {
     })
   }
 
-  const BUNDLED_PROVIDERS: Record<string, (options: any) => SDK> = {
+  type Bundle = Omit<SDK, "embeddingModel" | "rerankingModel"> & {
+    embeddingModel?: SDK["embeddingModel"]
+    rerankingModel?: SDK["rerankingModel"]
+  }
+
+  const BUNDLED_PROVIDERS: Record<string, (options: any) => Bundle> = {
     "@ai-sdk/amazon-bedrock": createAmazonBedrock,
     "@ai-sdk/anthropic": createAnthropic,
     "@ai-sdk/azure": createAzure,
@@ -810,11 +815,11 @@ export namespace Provider {
     }
 
     const providers: { [providerID: string]: Info } = {}
-    const languages = new Map<string, LanguageModelV2>()
+    const languages = new Map<string, LanguageModelV3>()
     const modelLoaders: {
       [providerID: string]: CustomModelLoader
     } = {}
-    const sdk = new Map<string, SDK>()
+    const sdk = new Map<string, Bundle>()
 
     log.info("init")
 
@@ -1078,7 +1083,7 @@ export namespace Provider {
     return state().then((state) => state.providers)
   }
 
-  async function getSDK(model: Model) {
+  async function getSDK(model: Model): Promise<Bundle> {
     try {
       using _ = log.time("getSDK", {
         providerID: model.providerID,
@@ -1207,7 +1212,7 @@ export namespace Provider {
     return info
   }
 
-  export async function getLanguage(model: Model): Promise<LanguageModelV2> {
+  export async function getLanguage(model: Model): Promise<LanguageModelV3> {
     const s = await state()
     const key = `${model.providerID}/${model.id}`
     if (s.models.has(key)) return s.models.get(key)!

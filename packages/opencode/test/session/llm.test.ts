@@ -158,17 +158,17 @@ function createChatStream(text: string) {
   const payload =
     [
       `data: ${JSON.stringify({
-        id: "chatcmpl-1",
+        id: "chatcmpl-1",  // as MessageID
         object: "chat.completion.chunk",
         choices: [{ delta: { role: "assistant" } }],
       })}`,
       `data: ${JSON.stringify({
-        id: "chatcmpl-1",
+        id: "chatcmpl-1",  // as MessageID
         object: "chat.completion.chunk",
         choices: [{ delta: { content: text } }],
       })}`,
       `data: ${JSON.stringify({
-        id: "chatcmpl-1",
+        id: "chatcmpl-1",  // as MessageID
         object: "chat.completion.chunk",
         choices: [{ delta: {}, finish_reason: "stop" }],
       })}`,
@@ -276,14 +276,14 @@ describe("session.llm.stream", () => {
         } satisfies Agent.Info
 
         const user = {
-          id: "user-1",
+          id: "user-1",  // as MessageID
           sessionID,
           role: "user",
           time: { created: Date.now() },
           agent: agent.name,
           model: { providerID, modelID: resolved.id },
           variant: "high",
-        } satisfies MessageV2.User
+         } as unknown as MessageV2.User
 
         const stream = await LLM.stream({
           user,
@@ -336,7 +336,7 @@ describe("session.llm.stream", () => {
       {
         type: "response.created",
         response: {
-          id: "resp-1",
+          id: "resp-1",  // as MessageID
           created_at: Math.floor(Date.now() / 1000),
           model: model.id,
           service_tier: null,
@@ -344,7 +344,7 @@ describe("session.llm.stream", () => {
       },
       {
         type: "response.output_text.delta",
-        item_id: "item-1",
+        item_id: "item-1",  // as MessageID
         delta: "Hello",
         logprobs: null,
       },
@@ -405,14 +405,14 @@ describe("session.llm.stream", () => {
         } satisfies Agent.Info
 
         const user = {
-          id: "user-2",
+          id: "user-2",  // as MessageID
           sessionID,
           role: "user",
           time: { created: Date.now() },
           agent: agent.name,
           model: { providerID: "openai", modelID: resolved.id },
           variant: "high",
-        } satisfies MessageV2.User
+         } as unknown as MessageV2.User
 
         const stream = await LLM.stream({
           user,
@@ -456,7 +456,7 @@ describe("session.llm.stream", () => {
       {
         type: "response.created",
         response: {
-          id: "resp-2",
+          id: "resp-2",  // as MessageID
           created_at: Math.floor(Date.now() / 1000),
           model: model.id,
           service_tier: null,
@@ -464,7 +464,7 @@ describe("session.llm.stream", () => {
       },
       {
         type: "response.output_text.delta",
-        item_id: "item-2",
+        item_id: "item-2",  // as MessageID
         delta: "Hello",
         logprobs: null,
       },
@@ -526,14 +526,14 @@ describe("session.llm.stream", () => {
         } satisfies Agent.Info
 
         const user = {
-          id: "user-3",
+          id: "user-3",  // as MessageID
           sessionID,
           role: "user",
           time: { created: Date.now() },
           agent: agent.name,
           model: { providerID: "github-copilot", modelID: resolved.id },
           variant: "high",
-        } satisfies MessageV2.User
+         } as unknown as MessageV2.User
 
         const stream = await LLM.stream({
           user,
@@ -620,14 +620,14 @@ describe("session.llm.stream", () => {
         } satisfies Agent.Info
 
         const user = {
-          id: "user-4",
+          id: "user-4",  // as MessageID
           sessionID,
           role: "user",
           time: { created: Date.now() },
           agent: agent.name,
           model: { providerID: "github-copilot", modelID: resolved.id },
           variant: "high",
-        } satisfies MessageV2.User
+         } as unknown as MessageV2.User
 
         const stream = await LLM.stream({
           user,
@@ -669,7 +669,7 @@ describe("session.llm.stream", () => {
       {
         type: "message_start",
         message: {
-          id: "msg-1",
+          id: "msg-1",  // as MessageID
           model: model.id,
           usage: {
             input_tokens: 3,
@@ -738,13 +738,13 @@ describe("session.llm.stream", () => {
         } satisfies Agent.Info
 
         const user = {
-          id: "user-3",
+          id: "user-3",  // as MessageID
           sessionID,
           role: "user",
           time: { created: Date.now() },
           agent: agent.name,
           model: { providerID, modelID: resolved.id },
-        } satisfies MessageV2.User
+         } as unknown as MessageV2.User
 
         const stream = await LLM.stream({
           user,
@@ -839,13 +839,13 @@ describe("session.llm.stream", () => {
         } satisfies Agent.Info
 
         const user = {
-          id: "user-4",
+          id: "user-4",  // as MessageID
           sessionID,
           role: "user",
           time: { created: Date.now() },
           agent: agent.name,
           model: { providerID, modelID: resolved.id },
-        } satisfies MessageV2.User
+         } as unknown as MessageV2.User
 
         const stream = await LLM.stream({
           user,

@@ -68,7 +68,7 @@ export namespace ShareNext {
     Bus.subscribe(Session.Event.Updated, async (evt) => {
       const session = await Session.get(evt.properties.info.id)
 
-      await sync(session.id, [
+      await sync(session.id as SessionID, [
         {
           type: "session",
           data: session,
@@ -101,7 +101,7 @@ export namespace ShareNext {
       ])
     })
     Bus.subscribe(Session.Event.Diff, async (evt) => {
-      await sync(evt.properties.sessionID, [
+      await sync(evt.properties.sessionID as SessionID, [
         {
           type: "session_diff",
           data: evt.properties.diff,

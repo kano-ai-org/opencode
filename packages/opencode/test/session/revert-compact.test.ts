@@ -78,7 +78,7 @@ describe("revert + compact workflow", () => {
       fn: async () => {
         // Create a session
         const session = await Session.create({})
-        const sessionID = session.id
+        const sessionID = session.id as any
 
         // Create a user message
         const userMsg1 = await Session.updateMessage({
@@ -254,7 +254,7 @@ describe("revert + compact workflow", () => {
       fn: async () => {
         // Create a session
         const session = await Session.create({})
-        const sessionID = session.id
+        const sessionID = session.id as any
 
         // Create initial messages
         const userMsg = await Session.updateMessage({

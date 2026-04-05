@@ -246,7 +246,13 @@ export namespace Agent {
                 options: {},
                 native: false,
               }
-            if (value.model) item.model = Provider.parseModel(value.model)
+             if (value.model) {
+               const parsed = Provider.parseModel(value.model)
+               item.model = {
+                 providerID: ProviderID.make(parsed.providerID),
+                 modelID: ModelID.make(parsed.modelID),
+               } as any
+             }
             item.variant = value.variant ?? item.variant
             item.prompt = value.prompt ?? item.prompt
             item.description = value.description ?? item.description

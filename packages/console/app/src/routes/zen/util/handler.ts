@@ -24,7 +24,7 @@ import {
   FreeUsageLimitError,
   SubscriptionUsageLimitError,
 } from "./error"
-import { createBodyConverter, createStreamPartConverter, createResponseConverter, UsageInfo } from "./provider/provider"
+import { createBodyConverter, createStreamPartConverter, createResponseConverter, buildCostChunk, UsageInfo } from "./provider/provider"
 import { anthropicHelper } from "./provider/anthropic"
 import { googleHelper } from "./provider/google"
 import { openaiHelper } from "./provider/openai"
@@ -118,9 +118,9 @@ export async function handler(
     const zenData = ZenData.list(opts.modelList)
     const modelInfo = validateModel(zenData, model)
     const dataDumper = createDataDumper(sessionId, requestId, projectId)
-    const trialLimiter = createTrialLimiter(modelInfo.trialProvider, ip)
+    const trialLimiter = createTrialLimiter(modelInfo.trialProviders, ip)
     const trialProvider = await trialLimiter?.check()
-    const rateLimiter = createRateLimiter(modelInfo.allowAnonymous, ip, input.request)
+    const rateLimiter = createRateLimiter(modelInfo.id, modelInfo.allowAnonymous, modelInfo.rateLimit, ip, input.request)
     await rateLimiter?.check()
     const stickyTracker = createStickyTracker(modelInfo.stickyProvider, sessionId)
     const stickyProvider = await stickyTracker?.get()
@@ -135,7 +135,7 @@ export async function handler(
         authInfo,
         modelInfo,
         sessionId,
-        trialProvider,
+        trialProvider?.[0],
         retry,
         stickyProvider,
       )
@@ -146,14 +146,11 @@ export async function handler(
       const startTimestamp = Date.now()
       const reqUrl = providerInfo.modifyUrl(providerInfo.api, isStream)
       const reqBody = JSON.stringify(
-        providerInfo.modifyBody(
-          {
-            ...createBodyConverter(opts.format, providerInfo.format)(body),
-            model: providerInfo.model,
-            ...(providerInfo.payloadModifier ?? {}),
-          },
-          authInfo?.workspaceID,
-        ),
+        providerInfo.modifyBody({
+          ...createBodyConverter(opts.format, providerInfo.format)(body),
+          model: providerInfo.model,
+          ...(providerInfo.payloadModifier ?? {}),
+        }),
       )
       logger.debug("REQUEST URL: " + reqUrl)
       logger.debug("REQUEST: " + reqBody.substring(0, 300) + "...")
@@ -283,7 +280,7 @@ export async function handler(
                   await trackUsage(sessionId, billingSource, authInfo, modelInfo, providerInfo, usageInfo, costInfo)
                   await reload(billingSource, authInfo, costInfo)
                   const cost = calculateOccuredCost(billingSource, costInfo)
-                  c.enqueue(encoder.encode(usageParser.buidlCostChunk(cost)))
+                  c.enqueue(encoder.encode(buildCostChunk(providerInfo.format, cost)))
                 }
                 c.close()
                 return
