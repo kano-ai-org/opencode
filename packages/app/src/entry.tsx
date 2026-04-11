@@ -1,6 +1,7 @@
 // @refresh reload
 
 import * as Sentry from "@sentry/solid"
+import { iife } from "@opencode-ai/util/iife"
 import { render } from "solid-js/web"
 import { AppBaseProviders, AppInterface } from "@/app"
 import { type Platform, PlatformProvider } from "@/context/platform"
@@ -11,6 +12,7 @@ import pkg from "../package.json"
 import { ServerConnection } from "./context/server"
 
 const DEFAULT_SERVER_URL_KEY = "opencode.settings.dat:defaultServerUrl"
+const DEV_NONCE_KEY = "opencode.dev.uiNonce"
 
 const getLocale = () => {
   if (typeof navigator !== "object") return "en" as const
@@ -45,6 +47,31 @@ const setStorage = (key: string, value: string | null) => {
       return
     }
     localStorage.removeItem(key)
+  } catch {
+    return
+  }
+}
+
+const clearDevPersistedState = (nonce: string | undefined) => {
+  if (typeof localStorage === "undefined") return
+  if (!nonce) return
+
+  try {
+    const previous = localStorage.getItem(DEV_NONCE_KEY)
+    if (previous === nonce) return
+
+    const keysToRemove: string[] = []
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index)
+      if (!key) continue
+      if (key.startsWith("opencode.")) keysToRemove.push(key)
+    }
+    keysToRemove.push(DEFAULT_SERVER_URL_KEY)
+
+    for (const key of keysToRemove) {
+      localStorage.removeItem(key)
+    }
+    localStorage.setItem(DEV_NONCE_KEY, nonce)
   } catch {
     return
   }
@@ -98,19 +125,6 @@ if (!(root instanceof HTMLElement) && import.meta.env.DEV) {
   throw new Error(getRootNotFoundError())
 }
 
-const getCurrentUrl = () => {
-  if (location.hostname.includes("opencode.ai")) return "http://localhost:4096"
-  if (import.meta.env.DEV)
-    return `http://${import.meta.env.VITE_OPENCODE_SERVER_HOST ?? "localhost"}:${import.meta.env.VITE_OPENCODE_SERVER_PORT ?? "4096"}`
-  return location.origin
-}
-
-const getDefaultUrl = () => {
-  const lsDefault = readDefaultServerUrl()
-  if (lsDefault) return lsDefault
-  return getCurrentUrl()
-}
-
 const platform: Platform = {
   platform: "web",
   version: pkg.version,
@@ -120,10 +134,12 @@ const platform: Platform = {
   restart,
   notify,
   getDefaultServer: async () => {
-    const stored = readDefaultServerUrl()
-    return stored ? ServerConnection.Key.make(stored) : null
+    const url = await readDefaultServerUrl()
+    return url ? ServerConnection.Key.make(url) : null
   },
-  setDefaultServer: writeDefaultServerUrl,
+  setDefaultServer: async (key) => {
+    await writeDefaultServerUrl(key ? (key as string) : null)
+  },
 }
 
 if (import.meta.env.VITE_SENTRY_DSN) {
@@ -145,17 +161,24 @@ if (import.meta.env.VITE_SENTRY_DSN) {
   })
 }
 
+const defaultUrl = iife(() => {
+  const lsDefault = readDefaultServerUrl()
+  if (lsDefault) return lsDefault
+  if (location.hostname.includes("opencode.ai")) return "http://localhost:4096"
+  if (import.meta.env.DEV)
+    return `http://${import.meta.env.VITE_OPENCODE_SERVER_HOST ?? "localhost"}:${import.meta.env.VITE_OPENCODE_SERVER_PORT ?? "4096"}`
+  return location.origin
+})
+
+clearDevPersistedState(import.meta.env.VITE_OPENCODE_DEV_NONCE)
+
 if (root instanceof HTMLElement) {
-  const server: ServerConnection.Http = { type: "http", http: { url: getCurrentUrl() } }
+  const server: ServerConnection.Http = { type: "http", http: { url: defaultUrl } }
   render(
     () => (
       <PlatformProvider value={platform}>
         <AppBaseProviders>
-          <AppInterface
-            defaultServer={ServerConnection.Key.make(getDefaultUrl())}
-            servers={[server]}
-            disableHealthCheck
-          />
+          <AppInterface defaultServer={ServerConnection.key(server)} servers={[server]} />
         </AppBaseProviders>
       </PlatformProvider>
     ),
