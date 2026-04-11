@@ -19,14 +19,28 @@ const popularProviderSet = new Set(popularProviders)
 export function useProviders() {
   const serverSync = useServerSync()
   const params = useParams()
-  const dir = createMemo(() => decode64(params.dir) ?? "")
-  const providers = () => {
-    if (dir()) {
-      const [projectStore] = serverSync.child(dir())
-      if (projectStore.provider_ready) return projectStore.provider
-    }
-    return serverSync.data.provider
-  }
+  const currentDirectory = createMemo(() => decode64(params.dir) ?? "")
+  const providers = createMemo(() => {
+    const global = serverSync.data.provider
+    const directory = currentDirectory()
+    if (!directory) return global
+    const [projectStore] = serverSync.child(directory)
+    if (!projectStore.provider_ready) return global
+    const project = projectStore.provider
+    if (!project.all.length) return global
+
+    const count = (input: typeof global) =>
+      new Map(input.all.map((provider) => [provider.id, Object.keys(provider.models).length]))
+
+    const fresh = (() => {
+      const projectCount = count(project)
+      const globalCount = count(global)
+      return global.connected.every((id) => (projectCount.get(id) ?? 0) >= (globalCount.get(id) ?? 0))
+    })()
+
+    if (!fresh) return global
+    return project
+  })
   return {
     all: () => providers().all,
     default: () => providers().default,
