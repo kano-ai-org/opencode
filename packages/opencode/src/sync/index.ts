@@ -239,25 +239,35 @@ export namespace SyncEvent {
   }
 
   export function payloads() {
-    return z
-      .union(
-        registry
-          .entries()
-          .map(([type, def]) => {
-            return z
-              .object({
-                type: z.literal(type),
-                aggregate: z.literal(def.aggregate),
-                data: def.schema,
-              })
-              .meta({
-                ref: "SyncEvent" + "." + def.type,
-              })
+    const defs = registry
+      .entries()
+      .map(([type, def]) =>
+        z
+          .object({
+            type: z.literal(type),
+            aggregate: z.literal(def.aggregate),
+            data: def.schema,
           })
-          .toArray() as any,
+          .meta({
+            ref: "SyncEvent" + "." + def.type,
+          }),
       )
-      .meta({
+      .toArray()
+
+    if (defs.length === 0) {
+      return z.never().meta({
         ref: "SyncEvent",
       })
+    }
+
+    if (defs.length === 1) {
+      return defs[0].meta({
+        ref: "SyncEvent",
+      })
+    }
+
+    return z.union(defs as [typeof defs[number], typeof defs[number], ...typeof defs[number][]]).meta({
+      ref: "SyncEvent",
+    })
   }
 }

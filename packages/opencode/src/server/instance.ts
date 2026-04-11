@@ -1,10 +1,8 @@
-import { describeRoute, resolver, validator } from "hono-openapi"
+import { describeRoute, resolver } from "hono-openapi"
 import { Hono } from "hono"
 import { proxy } from "hono/proxy"
-import type { UpgradeWebSocket } from "hono/ws"
 import z from "zod"
 import { createHash } from "node:crypto"
-import * as fs from "node:fs/promises"
 import { Log } from "../util/log"
 import { Format } from "../format"
 import { TuiRoutes } from "./routes/tui"
@@ -18,7 +16,6 @@ import { Command } from "../command"
 import { Flag } from "../flag/flag"
 import { QuestionRoutes } from "./routes/question"
 import { PermissionRoutes } from "./routes/permission"
-import { Snapshot } from "@/snapshot"
 import { ProjectRoutes } from "./routes/project"
 import { SessionRoutes } from "./routes/session"
 import { PtyRoutes } from "./routes/pty"
@@ -29,7 +26,6 @@ import { ExperimentalRoutes } from "./routes/experimental"
 import { ProviderRoutes } from "./routes/provider"
 import { EventRoutes } from "./routes/event"
 import { errorHandler } from "./middleware"
-import { getMimeType } from "hono/utils/mime"
 
 const log = Log.create({ service: "server" })
 
@@ -44,11 +40,14 @@ const DEFAULT_CSP =
 const csp = (hash = "") =>
   `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:`
 
-export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()) =>
-  app
+const webUIOrigins = () =>
+  [...new Set([Flag.OPENCODE_WEB_UI_ORIGIN, "https://app.opencode.ai"].filter((value): value is string => Boolean(value)).map((value) => value.replace(/\/+$/, "")))]
+
+export const InstanceRoutes = (app?: Hono) =>
+  (app ?? new Hono())
     .onError(errorHandler(log))
     .route("/project", ProjectRoutes())
-    .route("/pty", PtyRoutes(upgrade))
+    .route("/pty", PtyRoutes())
     .route("/config", ConfigRoutes())
     .route("/experimental", ExperimentalRoutes())
     .route("/session", SessionRoutes())
@@ -138,38 +137,10 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()
         },
       }),
       async (c) => {
-        const [branch, default_branch] = await Promise.all([Vcs.branch(), Vcs.defaultBranch()])
+        const branch = await Vcs.branch()
         return c.json({
           branch,
-          default_branch,
         })
-      },
-    )
-    .get(
-      "/vcs/diff",
-      describeRoute({
-        summary: "Get VCS diff",
-        description: "Retrieve the current git diff for the working tree or against the default branch.",
-        operationId: "vcs.diff",
-        responses: {
-          200: {
-            description: "VCS diff",
-            content: {
-              "application/json": {
-                schema: resolver(Vcs.FileDiff.array()),
-              },
-            },
-          },
-        },
-      }),
-      validator(
-        "query",
-        z.object({
-          mode: Vcs.Mode,
-        }),
-      ),
-      async (c) => {
-        return c.json(await Vcs.diff(c.req.valid("query").mode))
       },
     )
     .get(
@@ -281,24 +252,43 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()
       },
     )
     .all("/*", async (c) => {
-      const embeddedWebUI = await embeddedUIPromise
       const path = c.req.path
 
+      for (const ui of webUIOrigins()) {
+        try {
+          const response = await proxy(`${ui}${path}`, {
+            ...c.req,
+            headers: {
+              ...c.req.raw.headers,
+              host: new URL(ui).host,
+            },
+          })
+          response.headers.set("X-OpenCode-UI-Origin", ui)
+          if (response.headers.get("content-type")?.includes("text/html")) {
+            response.headers.set("Content-Security-Policy", DEFAULT_CSP)
+          }
+          return response
+        } catch (error) {
+          log.warn("web ui proxy failed", { ui, path, error })
+        }
+      }
+
+      const embeddedWebUI = await embeddedUIPromise
       if (embeddedWebUI) {
         const match = embeddedWebUI[path.replace(/^\//, "")] ?? embeddedWebUI["index.html"] ?? null
         if (!match) return c.json({ error: "Not Found" }, 404)
-
-        if (await fs.exists(match)) {
-          const mime = getMimeType(match) ?? "text/plain"
-          c.header("Content-Type", mime)
-          if (mime.startsWith("text/html")) {
+        const file = Bun.file(match)
+        if (await file.exists()) {
+          c.header("Content-Type", file.type)
+          if (file.type.startsWith("text/html")) {
             c.header("Content-Security-Policy", DEFAULT_CSP)
           }
-          return c.body(new Uint8Array(await fs.readFile(match)))
-        } else {
-          return c.json({ error: "Not Found" }, 404)
+          return c.body(await file.arrayBuffer())
         }
-      } else {
+        return c.json({ error: "Not Found" }, 404)
+      }
+
+      {
         const response = await proxy(`https://app.opencode.ai${path}`, {
           ...c.req,
           headers: {

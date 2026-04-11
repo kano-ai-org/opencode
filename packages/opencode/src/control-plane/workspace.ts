@@ -88,12 +88,12 @@ export namespace Workspace {
     return info
   })
 
-  export function list(project: Project.Info) {
-    const rows = Database.use((db) =>
-      db.select().from(WorkspaceTable).where(eq(WorkspaceTable.project_id, project.id)).all(),
-    )
-    return rows.map(fromRow).sort((a, b) => a.id.localeCompare(b.id))
-  }
+   export function list(project: Project.Info) {
+     const rows = Database.use((db) =>
+       db.select().from(WorkspaceTable).where(eq(WorkspaceTable.project_id, project.id as any)).all(),
+     )
+     return rows.map(fromRow).sort((a, b) => a.id.localeCompare(b.id))
+   }
 
   export const get = fn(WorkspaceID.zod, async (id) => {
     const row = Database.use((db) => db.select().from(WorkspaceTable).where(eq(WorkspaceTable.id, id)).get())

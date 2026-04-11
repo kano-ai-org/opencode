@@ -62,7 +62,7 @@ export type Platform = {
   getDefaultServer?(): Promise<ServerConnection.Key | null>
 
   /** Set the default server URL to use on app startup (platform-specific) */
-  setDefaultServer?(url: ServerConnection.Key | null): Promise<void> | void
+  setDefaultServer?(url: string | null): Promise<void> | void
 
   /** Get the configured WSL integration (desktop only) */
   getWslEnabled?(): Promise<boolean>

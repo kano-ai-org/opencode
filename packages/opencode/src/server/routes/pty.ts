@@ -1,4 +1,4 @@
-import { Hono, type MiddlewareHandler } from "hono"
+import { Hono } from "hono"
 import { describeRoute, validator, resolver } from "hono-openapi"
 import type { UpgradeWebSocket } from "hono/ws"
 import z from "zod"
@@ -7,8 +7,8 @@ import { PtyID } from "@/pty/schema"
 import { NotFoundError } from "../../storage/db"
 import { errors } from "../error"
 
-export function PtyRoutes(upgradeWebSocket: UpgradeWebSocket) {
-  return new Hono()
+export function PtyRoutes(upgradeWebSocket?: UpgradeWebSocket) {
+  const app = new Hono()
     .get(
       "/",
       describeRoute({
@@ -28,30 +28,6 @@ export function PtyRoutes(upgradeWebSocket: UpgradeWebSocket) {
       }),
       async (c) => {
         return c.json(await Pty.list())
-      },
-    )
-    .post(
-      "/",
-      describeRoute({
-        summary: "Create PTY session",
-        description: "Create a new pseudo-terminal (PTY) session for running shell commands and processes.",
-        operationId: "pty.create",
-        responses: {
-          200: {
-            description: "Created session",
-            content: {
-              "application/json": {
-                schema: resolver(Pty.Info),
-              },
-            },
-          },
-          ...errors(400),
-        },
-      }),
-      validator("json", Pty.CreateInput),
-      async (c) => {
-        const info = await Pty.create(c.req.valid("json"))
-        return c.json(info)
       },
     )
     .get(
@@ -78,6 +54,30 @@ export function PtyRoutes(upgradeWebSocket: UpgradeWebSocket) {
         if (!info) {
           throw new NotFoundError({ message: "Session not found" })
         }
+        return c.json(info)
+      },
+    )
+    .post(
+      "/",
+      describeRoute({
+        summary: "Create PTY session",
+        description: "Create a new pseudo-terminal (PTY) session for running shell commands and processes.",
+        operationId: "pty.create",
+        responses: {
+          200: {
+            description: "Created session",
+            content: {
+              "application/json": {
+                schema: resolver(Pty.Info),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("json", Pty.CreateInput),
+      async (c) => {
+        const info = await Pty.create(c.req.valid("json"))
         return c.json(info)
       },
     )
@@ -130,26 +130,30 @@ export function PtyRoutes(upgradeWebSocket: UpgradeWebSocket) {
         return c.json(true)
       },
     )
-    .get(
-      "/:ptyID/connect",
-      describeRoute({
-        summary: "Connect to PTY session",
-        description: "Establish a WebSocket connection to interact with a pseudo-terminal (PTY) session in real-time.",
-        operationId: "pty.connect",
-        responses: {
-          200: {
-            description: "Connected session",
-            content: {
-              "application/json": {
-                schema: resolver(z.boolean()),
-              },
+  if (!upgradeWebSocket) {
+    return app
+  }
+
+  return app.get(
+    "/:ptyID/connect",
+    describeRoute({
+      summary: "Connect to PTY session",
+      description: "Establish a WebSocket connection to interact with a pseudo-terminal (PTY) session in real-time.",
+      operationId: "pty.connect",
+      responses: {
+        200: {
+          description: "Connected session",
+          content: {
+            "application/json": {
+              schema: resolver(z.boolean()),
             },
           },
-          ...errors(404),
         },
-      }),
-      validator("param", z.object({ ptyID: PtyID.zod })),
-      upgradeWebSocket(async (c) => {
+        ...errors(404),
+      },
+    }),
+    validator("param", z.object({ ptyID: PtyID.zod })),
+    upgradeWebSocket(async (c) => {
         const id = PtyID.zod.parse(c.req.param("ptyID"))
         const cursor = (() => {
           const value = c.req.query("cursor")
@@ -206,5 +210,5 @@ export function PtyRoutes(upgradeWebSocket: UpgradeWebSocket) {
           },
         }
       }),
-    )
+  )
 }

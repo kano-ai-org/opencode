@@ -62,23 +62,23 @@ export function toPartialRow(info: DeepPartial<Session.Info>) {
 }
 
 export default [
-  SyncEvent.project(Session.Event.Created, (db, data) => {
-    db.insert(SessionTable).values(Session.toRow(data.info)).run()
+  SyncEvent.project(Session.Event.Created as any, (db, data) => {
+    db.insert(SessionTable).values(Session.toRow(data.info as any)).run()
   }),
 
-  SyncEvent.project(Session.Event.Updated, (db, data) => {
+  SyncEvent.project(Session.Event.Updated as any, (db, data) => {
     const info = data.info
     const row = db
       .update(SessionTable)
-      .set(toPartialRow(info))
-      .where(eq(SessionTable.id, data.sessionID))
+      .set(toPartialRow(info as any))
+      .where(eq(SessionTable.id, data.sessionID as any))
       .returning()
       .get()
     if (!row) throw new NotFoundError({ message: `Session not found: ${data.sessionID}` })
   }),
 
-  SyncEvent.project(Session.Event.Deleted, (db, data) => {
-    db.delete(SessionTable).where(eq(SessionTable.id, data.sessionID)).run()
+  SyncEvent.project(Session.Event.Deleted as any, (db, data) => {
+    db.delete(SessionTable).where(eq(SessionTable.id, data.sessionID as any)).run()
   }),
 
   SyncEvent.project(MessageV2.Event.Updated, (db, data) => {

@@ -26,7 +26,7 @@ function local(method: string, path: string) {
   return false
 }
 
-export function WorkspaceRouterMiddleware(upgrade: UpgradeWebSocket): MiddlewareHandler {
+export function WorkspaceRouterMiddleware(upgrade?: UpgradeWebSocket): MiddlewareHandler {
   const routes = lazy(() => InstanceRoutes(upgrade))
 
   return async (c) => {
@@ -88,7 +88,7 @@ export function WorkspaceRouterMiddleware(upgrade: UpgradeWebSocket): Middleware
       return routes().fetch(c.req.raw, c.env)
     }
 
-    if (c.req.header("upgrade")?.toLowerCase() === "websocket") {
+    if (upgrade && c.req.header("upgrade")?.toLowerCase() === "websocket") {
       return ServerProxy.websocket(upgrade, target, c.req.raw, c.env)
     }
 

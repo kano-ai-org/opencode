@@ -6,7 +6,6 @@ import z from "zod"
 import { Session } from "../../session"
 import { MessageV2 } from "../../session/message-v2"
 import { SessionPrompt } from "../../session/prompt"
-import { SessionRunState } from "@/session/run-state"
 import { SessionCompaction } from "../../session/compaction"
 import { SessionRevert } from "../../session/revert"
 import { SessionStatus } from "@/session/status"
@@ -14,7 +13,6 @@ import { SessionSummary } from "@/session/summary"
 import { Todo } from "../../session/todo"
 import { Agent } from "../../agent/agent"
 import { Snapshot } from "@/snapshot"
-import { Command } from "../../command"
 import { Log } from "../../util/log"
 import { Permission } from "@/permission"
 import { PermissionID } from "@/permission/schema"
@@ -23,6 +21,10 @@ import { errors } from "../error"
 import { lazy } from "../../util/lazy"
 import { Bus } from "../../bus"
 import { NamedError } from "@opencode-ai/util/error"
+import { Instance } from "@/project/instance"
+import { WorkspaceContext } from "@/control-plane/workspace-context"
+
+import { SessionTransfer } from "@/session/transfer"
 
 const log = Log.create({ service: "server" })
 
@@ -48,6 +50,7 @@ export const SessionRoutes = lazy(() =>
       validator(
         "query",
         z.object({
+          projectID: z.string().optional().meta({ description: "Filter sessions by project ID" }),
           directory: z.string().optional().meta({ description: "Filter sessions by project directory" }),
           roots: z.coerce.boolean().optional().meta({ description: "Only return root sessions (no parentID)" }),
           start: z.coerce
@@ -62,6 +65,7 @@ export const SessionRoutes = lazy(() =>
         const query = c.req.valid("query")
         const sessions: Session.Info[] = []
         for await (const session of Session.list({
+          projectID: query.projectID,
           directory: query.directory,
           roots: query.roots,
           start: query.start,
@@ -71,6 +75,90 @@ export const SessionRoutes = lazy(() =>
           sessions.push(session)
         }
         return c.json(sessions)
+      },
+    )
+    .get(
+      "/export",
+      describeRoute({
+        summary: "Export sessions",
+        description: "Export projects/sessions/messages into a portable JSON bundle.",
+        operationId: "session.export",
+        responses: {
+          200: {
+            description: "Session export bundle",
+            content: {
+              "application/json": {
+                schema: resolver(z.unknown()),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        return c.json(await SessionTransfer.exportAll())
+      },
+    )
+    .post(
+      "/import",
+      describeRoute({
+        summary: "Import sessions",
+        description: "Import projects/sessions/messages from uploaded file or remote URL.",
+        operationId: "session.import",
+        responses: {
+          200: {
+            description: "Import summary",
+            content: {
+              "application/json": {
+                schema: resolver(z.record(z.string(), z.number())),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      async (c) => {
+        const type = c.req.header("content-type") ?? ""
+
+        if (type.includes("multipart/form-data")) {
+          const form = await c.req.formData()
+          const file = form.get("file")
+          const url = form.get("url")
+
+          if (file instanceof File) {
+            const bytes = new Uint8Array(await file.arrayBuffer())
+            const parsed = SessionTransfer.parse(bytes)
+            return c.json(await SessionTransfer.importAll(parsed))
+          }
+
+          if (typeof url === "string" && url.trim()) {
+            const response = await fetch(url.trim())
+            if (!response.ok) throw new Error(`failed to download import url: ${response.status}`)
+            const bytes = new Uint8Array(await response.arrayBuffer())
+            const parsed = SessionTransfer.parse(bytes)
+            return c.json(await SessionTransfer.importAll(parsed))
+          }
+
+          throw new Error("import requires file or url")
+        }
+
+        const body = await c.req.json().catch(() => undefined)
+        if (!body || typeof body !== "object") throw new Error("invalid import payload")
+
+        const value = body as { url?: string; data?: unknown }
+        if (value.url) {
+          const response = await fetch(value.url)
+          if (!response.ok) throw new Error(`failed to download import url: ${response.status}`)
+          const bytes = new Uint8Array(await response.arrayBuffer())
+          const parsed = SessionTransfer.parse(bytes)
+          return c.json(await SessionTransfer.importAll(parsed))
+        }
+
+        if (value.data) {
+          const parsed = SessionTransfer.parse(JSON.stringify(value.data))
+          return c.json(await SessionTransfer.importAll(parsed))
+        }
+
+        throw new Error("import requires url or data")
       },
     )
     .get(
@@ -123,6 +211,7 @@ export const SessionRoutes = lazy(() =>
       ),
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
+        log.info("SEARCH", { url: c.req.url })
         const session = await Session.get(sessionID)
         return c.json(session)
       },
@@ -293,7 +382,6 @@ export const SessionRoutes = lazy(() =>
         return c.json(session)
       },
     )
-    // TODO(v2): remove this dedicated route and rely on the normal `/init` command flow.
     .post(
       "/:sessionID/init",
       describeRoute({
@@ -319,24 +407,11 @@ export const SessionRoutes = lazy(() =>
           sessionID: SessionID.zod,
         }),
       ),
-      validator(
-        "json",
-        z.object({
-          modelID: ModelID.zod,
-          providerID: ProviderID.zod,
-          messageID: MessageID.zod,
-        }),
-      ),
+      validator("json", Session.initialize.schema.omit({ sessionID: true })),
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
         const body = c.req.valid("json")
-        await SessionPrompt.command({
-          sessionID,
-          messageID: body.messageID,
-          model: body.providerID + "/" + body.modelID,
-          command: Command.Default.INIT,
-          arguments: "",
-        })
+        await Session.initialize({ ...body, sessionID })
         return c.json(true)
       },
     )
@@ -714,7 +789,7 @@ export const SessionRoutes = lazy(() =>
       ),
       async (c) => {
         const params = c.req.valid("param")
-        await SessionRunState.assertNotBusy(params.sessionID)
+        await SessionPrompt.assertNotBusy(params.sessionID)
         await Session.removeMessage({
           sessionID: params.sessionID,
           messageID: params.messageID,
@@ -860,14 +935,20 @@ export const SessionRoutes = lazy(() =>
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
         const body = c.req.valid("json")
-        SessionPrompt.prompt({ ...body, sessionID }).catch((err) => {
+        const workspaceID = WorkspaceContext.workspaceID
+        const runPrompt = Instance.bind(() =>
+          WorkspaceContext.provide({
+            workspaceID,
+            fn: () => SessionPrompt.prompt({ ...body, sessionID }),
+          }),
+        )
+        runPrompt().catch((err) => {
           log.error("prompt_async failed", { sessionID, error: err })
           Bus.publish(Session.Event.Error, {
             sessionID,
             error: new NamedError.Unknown({ message: err instanceof Error ? err.message : String(err) }).toObject(),
           })
         })
-
         return c.body(null, 204)
       },
     )
@@ -919,7 +1000,7 @@ export const SessionRoutes = lazy(() =>
             description: "Created message",
             content: {
               "application/json": {
-                schema: resolver(MessageV2.WithParts),
+                schema: resolver(MessageV2.Assistant),
               },
             },
           },

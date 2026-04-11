@@ -10,6 +10,8 @@ export interface DialogProps extends ParentProps {
   size?: "normal" | "large" | "x-large"
   class?: ComponentProps<"div">["class"]
   classList?: ComponentProps<"div">["classList"]
+  containerClass?: ComponentProps<"div">["class"]
+  containerClassList?: ComponentProps<"div">["classList"]
   fit?: boolean
   transition?: boolean
 }
@@ -23,7 +25,13 @@ export function Dialog(props: DialogProps) {
       data-size={props.size || "normal"}
       data-transition={props.transition ? true : undefined}
     >
-      <div data-slot="dialog-container">
+      <div
+        data-slot="dialog-container"
+        class={props.containerClass}
+        classList={{
+          ...(props.containerClassList ?? {}),
+        }}
+      >
         <Kobalte.Content
           data-slot="dialog-content"
           data-no-header={!props.title && !props.action ? "" : undefined}

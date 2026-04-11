@@ -1,69 +1,63 @@
 @import "@opencode-ai/ui/styles/tailwind";
 
-@layer components {
-  @keyframes session-progress-whip {
-    0% {
-      clip-path: inset(0 100% 0 0 round 999px);
-      animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
-    }
+[data-component="dialog"][data-size="x-large"] [data-slot="dialog-container"].settings-dialog-shell {
+  position: relative;
+  resize: both;
+  overflow: auto;
+  min-width: min(96vw, 760px);
+  min-height: min(88vh, 520px);
+  max-width: 98vw;
+  max-height: 96vh;
+}
 
-    48% {
-      clip-path: inset(0 0 0 0 round 999px);
-      animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
-    }
+[data-component="dialog"][data-size="x-large"] [data-slot="dialog-container"].settings-dialog-compact {
+  width: min(900px, 94vw);
+  height: min(70vh, 620px);
+}
 
-    100% {
-      clip-path: inset(0 0 0 100% round 999px);
-    }
+[data-component="dialog"][data-size="x-large"] [data-slot="dialog-container"].settings-dialog-normal {
+  width: min(1080px, 96vw);
+  height: min(84vh, 860px);
+}
+
+[data-component="dialog"][data-size="x-large"] [data-slot="dialog-container"].settings-dialog-expanded {
+  width: min(1500px, 98vw);
+  height: min(96vh, 1100px);
+}
+
+.settings-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-dialog-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 1024px) {
+  [data-component="dialog"][data-size="x-large"] [data-slot="dialog-container"].settings-dialog-shell {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    min-width: 100vw;
+    min-height: 100vh;
+    resize: none;
   }
 
-  [data-component="session-progress"] {
-    position: absolute;
-    inset: 0 0 auto;
-    height: 2px;
-    overflow: hidden;
-    pointer-events: none;
-    opacity: 1;
-    transition: opacity 220ms ease-out;
+  .settings-dialog-actions {
+    gap: 6px;
   }
 
-  [data-component="session-progress"][data-state="hiding"] {
-    opacity: 0;
+  .settings-dialog-zoom-controls {
+    display: none;
   }
 
-  [data-component="session-progress-bar"] {
-    width: 100%;
-    height: 100%;
-    border-radius: 999px;
-    background: var(--session-progress-color);
-    clip-path: inset(0 100% 0 0 round 999px);
-    animation: session-progress-whip var(--session-progress-ms, 1800ms) infinite;
-    will-change: clip-path;
-  }
-
-  [data-component="getting-started"] {
-    container-type: inline-size;
-    container-name: getting-started;
-  }
-
-  [data-component="getting-started-actions"] {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem; /* gap-3 */
-  }
-
-  [data-component="getting-started-actions"] > [data-component="button"] {
-    width: 100%;
-  }
-
-  @container getting-started (min-width: 17rem) {
-    [data-component="getting-started-actions"] {
-      flex-direction: row;
-      align-items: center;
-    }
-
-    [data-component="getting-started-actions"] > [data-component="button"] {
-      width: auto;
-    }
+  .settings-dialog-actions button {
+    min-height: 34px;
+    padding-inline: 10px;
   }
 }
