@@ -30,3 +30,6 @@ UPCOMING_CHANGELOG.md
 logs/
 *.bun-build
 tsconfig.tsbuildinfo
+.kano/cache/git/discover-repos/discover-repos.json
+.kano/cache/git/workspace-manifest.json
+/packages/opencode/src/provider/models-snapshot.ts
