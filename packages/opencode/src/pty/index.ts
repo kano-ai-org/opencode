@@ -359,7 +359,9 @@ export namespace Pty {
     }),
   )
 
-  const defaultLayer = layer.pipe(Layer.provide(Bus.layer), Layer.provide(Plugin.defaultLayer))
+  const defaultLayer = Plugin?.defaultLayer
+    ? layer.pipe(Layer.provide(Bus.layer), Layer.provide(Plugin.defaultLayer))
+    : layer.pipe(Layer.provide(Bus.layer))
 
   const { runPromise } = makeRuntime(Service, defaultLayer)
 

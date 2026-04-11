@@ -1,14 +1,10 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
-import type { Model } from "@opencode-ai/sdk/v2"
 import { Installation } from "@/installation"
 import { iife } from "@/util/iife"
-import { Log } from "../../util/log"
 import { setTimeout as sleep } from "node:timers/promises"
-import { CopilotModels } from "./models"
-
-const log = Log.create({ service: "plugin.copilot" })
 
 const CLIENT_ID = "Ov23li8tweQw6odWQebz"
+const OMO_INTERNAL_INITIATOR_MARKER = "<!-- OMO_INTERNAL_INITIATOR -->"
 // Add a small safety buffer when polling to avoid hitting the server
 // slightly too early due to clock skew / timer drift.
 const OAUTH_POLLING_SAFETY_MARGIN_MS = 3000 // 3 seconds
@@ -23,50 +19,74 @@ function getUrls(domain: string) {
   }
 }
 
-function base(enterpriseUrl?: string) {
-  return enterpriseUrl ? `https://copilot-api.${normalizeDomain(enterpriseUrl)}` : "https://api.githubcopilot.com"
+function contentHasInternalInitiatorMarker(content: unknown): boolean {
+  if (typeof content === "string") {
+    return content.includes(OMO_INTERNAL_INITIATOR_MARKER)
+  }
+
+  if (!Array.isArray(content)) {
+    return false
+  }
+
+  return content.some((part: any) => {
+    if (typeof part?.text === "string" && part.text.includes(OMO_INTERNAL_INITIATOR_MARKER)) {
+      return true
+    }
+    if (typeof part?.content === "string" && part.content.includes(OMO_INTERNAL_INITIATOR_MARKER)) {
+      return true
+    }
+    if (Array.isArray(part?.content)) {
+      return contentHasInternalInitiatorMarker(part.content)
+    }
+    return false
+  })
 }
 
-function fix(model: Model): Model {
-  return {
-    ...model,
-    api: {
-      ...model.api,
-      npm: "@ai-sdk/github-copilot",
-    },
-  }
+export function isCopilotAgentInitiatedMessage(last: { role?: string; content?: unknown } | undefined): boolean {
+  if (!last) return false
+  if (last.role !== "user") return true
+  return contentHasInternalInitiatorMarker(last.content)
 }
 
 export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
   const sdk = input.client
   return {
-    provider: {
-      id: "github-copilot",
-      async models(provider, ctx) {
-        if (ctx.auth?.type !== "oauth") {
-          return Object.fromEntries(Object.entries(provider.models).map(([id, model]) => [id, fix(model)]))
-        }
-
-        return CopilotModels.get(
-          base(ctx.auth.enterpriseUrl),
-          {
-            Authorization: `Bearer ${ctx.auth.refresh}`,
-            "User-Agent": `opencode/${Installation.VERSION}`,
-          },
-          provider.models,
-        ).catch((error) => {
-          log.error("failed to fetch copilot models", { error })
-          return Object.fromEntries(Object.entries(provider.models).map(([id, model]) => [id, fix(model)]))
-        })
-      },
-    },
     auth: {
       provider: "github-copilot",
-      async loader(getAuth) {
+      async loader(getAuth, provider) {
         const info = await getAuth()
         if (!info || info.type !== "oauth") return {}
 
-        const baseURL = base(info.enterpriseUrl)
+        const enterpriseUrl = info.enterpriseUrl
+        const baseURL = enterpriseUrl ? `https://copilot-api.${normalizeDomain(enterpriseUrl)}` : undefined
+
+        if (provider && provider.models) {
+          for (const model of Object.values(provider.models)) {
+            model.cost = {
+              input: 0,
+              output: 0,
+              cache: {
+                read: 0,
+                write: 0,
+              },
+            }
+
+            // TODO: re-enable once messages api has higher rate limits
+            // TODO: move some of this hacky-ness to models.dev presets once we have better grasp of things here...
+            // const base = baseURL ?? model.api.url
+            // const claude = model.id.includes("claude")
+            // const url = iife(() => {
+            //   if (!claude) return base
+            //   if (base.endsWith("/v1")) return base
+            //   if (base.endsWith("/")) return `${base}v1`
+            //   return `${base}/v1`
+            // })
+
+            // model.api.url = url
+            // model.api.npm = claude ? "@ai-sdk/anthropic" : "@ai-sdk/github-copilot"
+            model.api.npm = "@ai-sdk/github-copilot"
+          }
+        }
 
         return {
           baseURL,
@@ -88,7 +108,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
                       (msg: any) =>
                         Array.isArray(msg.content) && msg.content.some((part: any) => part.type === "image_url"),
                     ),
-                    isAgent: last?.role !== "user",
+                    isAgent: isCopilotAgentInitiatedMessage(last),
                   }
                 }
 
@@ -100,7 +120,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
                       (item: any) =>
                         Array.isArray(item?.content) && item.content.some((part: any) => part.type === "input_image"),
                     ),
-                    isAgent: last?.role !== "user",
+                    isAgent: isCopilotAgentInitiatedMessage(last),
                   }
                 }
 
@@ -122,7 +142,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
                               part.content.some((nested: any) => nested?.type === "image")),
                         ),
                     ),
-                    isAgent: !(last?.role === "user" && hasNonToolCalls),
+                    isAgent: isCopilotAgentInitiatedMessage(last) || !(last?.role === "user" && hasNonToolCalls),
                   }
                 }
               } catch {}
@@ -308,14 +328,6 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
           },
         },
       ],
-    },
-    "chat.params": async (incoming, output) => {
-      if (!incoming.model.providerID.includes("github-copilot")) return
-
-      // Match github copilot cli, omit maxOutputTokens for gpt models
-      if (incoming.model.api.id.includes("gpt")) {
-        output.maxOutputTokens = undefined
-      }
     },
     "chat.headers": async (incoming, output) => {
       if (!incoming.model.providerID.includes("github-copilot")) return

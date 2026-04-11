@@ -2,6 +2,7 @@ import { Global } from "../global"
 import { Log } from "../util/log"
 import path from "path"
 import z from "zod"
+import fs from "fs/promises"
 import { Installation } from "../installation"
 import { Flag } from "../flag/flag"
 import { lazy } from "@/util/lazy"
@@ -112,41 +113,45 @@ export namespace ModelsDev {
     return Flag.OPENCODE_MODELS_URL || "https://models.dev"
   }
 
-  function fresh() {
-    return Date.now() - Number(Filesystem.stat(filepath)?.mtimeMs ?? 0) < ttl
+  function fresh(file: string) {
+    return Date.now() - Number(Filesystem.stat(file)?.mtimeMs ?? 0) < ttl
   }
 
-  function skip(force: boolean) {
-    return !force && fresh()
+  function skip(file: string, force: boolean) {
+    return !force && fresh(file)
   }
 
   const fetchApi = async () => {
     const result = await fetch(`${url()}/api.json`, {
       headers: { "User-Agent": Installation.USER_AGENT },
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(10_000),
     })
     return { ok: result.ok, text: await result.text() }
   }
 
   export const Data = lazy(async () => {
-    const result = await Filesystem.readJson(Flag.OPENCODE_MODELS_PATH ?? filepath).catch(() => {})
+    const file = Flag.OPENCODE_MODELS_PATH ?? filepath
+    const result = await Filesystem.readJson(file).catch(() => {})
     if (result) return result
+
     // @ts-ignore
     const snapshot = await import("./models-snapshot.js")
       .then((m) => m.snapshot as Record<string, unknown>)
       .catch(() => undefined)
     if (snapshot) return snapshot
+
     if (Flag.OPENCODE_DISABLE_MODELS_FETCH) return {}
-    return Flock.withLock(`models-dev:${filepath}`, async () => {
-      const result = await Filesystem.readJson(Flag.OPENCODE_MODELS_PATH ?? filepath).catch(() => {})
-      if (result) return result
-      const result2 = await fetchApi()
-      if (result2.ok) {
-        await Filesystem.write(filepath, result2.text).catch((e) => {
+
+    return Flock.withLock(`models-dev:${file}`, async () => {
+      const cached = await Filesystem.readJson(file).catch(() => {})
+      if (cached) return cached
+      const fetched = await fetchApi()
+      if (fetched.ok) {
+        await Filesystem.write(file, fetched.text).catch((e) => {
           log.error("Failed to write models cache", { error: e })
         })
       }
-      return JSON.parse(result2.text)
+      return JSON.parse(fetched.text)
     })
   })
 
@@ -156,15 +161,66 @@ export namespace ModelsDev {
   }
 
   export async function refresh(force = false) {
-    if (skip(force)) return ModelsDev.Data.reset()
-    await Flock.withLock(`models-dev:${filepath}`, async () => {
-      if (skip(force)) return ModelsDev.Data.reset()
-      const result = await fetchApi()
-      if (!result.ok) return
-      await Filesystem.write(filepath, result.text)
+    const file = Flag.OPENCODE_MODELS_PATH ?? filepath
+    if (skip(file, force)) return ModelsDev.Data.reset()
+
+    const temp = `${file}.tmp-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+
+    const restore = async () => {
+      // @ts-ignore
+      const snapshot = await import("./models-snapshot")
+        .then((m) => m.snapshot as Record<string, unknown> | undefined)
+        .catch(() => undefined)
+      if (!snapshot || Object.keys(snapshot).length === 0) return false
+      await fs.mkdir(path.dirname(file), { recursive: true }).catch(() => {})
+      const text = JSON.stringify(snapshot)
+      await Filesystem.write(temp, text)
+      await fs.rm(file, { force: true }).catch(() => {})
+      const moved = await fs.rename(temp, file).then(() => true).catch(() => false)
+      if (!moved) {
+        await Filesystem.write(file, text)
+        await fs.rm(temp, { force: true }).catch(() => {})
+      }
+      ModelsDev.Data.reset()
+      log.info("Restored models cache from bundled snapshot")
+      return true
+    }
+
+    await Flock.withLock(`models-dev:${file}`, async () => {
+      if (skip(file, force)) return ModelsDev.Data.reset()
+      const result = await fetch(`${url()}/api.json`, {
+        headers: { "User-Agent": Installation.USER_AGENT },
+        signal: AbortSignal.timeout(10 * 1000),
+      }).catch((e) => {
+        log.error("Failed to fetch models.dev", {
+          error: e,
+        })
+      })
+
+      if (!result || !result.ok) {
+        if ((await Filesystem.size(file).catch(() => 0)) === 0) await restore()
+        return
+      }
+
+      const data = await result.json().catch(() => undefined)
+      if (!data || typeof data !== "object" || Array.isArray(data) || Object.keys(data).length === 0) {
+        log.error("Refusing to overwrite models cache with invalid payload")
+        if ((await Filesystem.size(file).catch(() => 0)) === 0) await restore()
+        return
+      }
+
+      const text = JSON.stringify(data)
+      await fs.mkdir(path.dirname(file), { recursive: true }).catch(() => {})
+      await Filesystem.write(temp, text)
+      await fs.rm(file, { force: true }).catch(() => {})
+      const moved = await fs.rename(temp, file).then(() => true).catch(() => false)
+      if (!moved) {
+        await Filesystem.write(file, text)
+        await fs.rm(temp, { force: true }).catch(() => {})
+      }
       ModelsDev.Data.reset()
     }).catch((e) => {
-      log.error("Failed to fetch models.dev", {
+      log.error("Failed to refresh models.dev", {
         error: e,
       })
     })

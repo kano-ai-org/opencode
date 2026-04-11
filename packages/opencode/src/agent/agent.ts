@@ -24,6 +24,56 @@ import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 
 export namespace Agent {
+  const INVISIBLE_AGENT_CHARACTERS_REGEX = /[\u200B\u200C\u200D\uFEFF]/g
+
+  function stripInvisibleAgentCharacters(value: string) {
+    return value.replace(INVISIBLE_AGENT_CHARACTERS_REGEX, "")
+  }
+
+  function normalizeAgentLookupValue(value: string) {
+    return stripInvisibleAgentCharacters(value).trim().toLowerCase()
+  }
+
+  function getAgentLookupAliases(value: string) {
+    const aliases = new Set<string>()
+    const trimmed = stripInvisibleAgentCharacters(value).trim()
+    if (!trimmed) return aliases
+
+    aliases.add(trimmed.toLowerCase())
+
+    const dashIndex = trimmed.indexOf(" - ")
+    if (dashIndex > 0) {
+      aliases.add(trimmed.slice(0, dashIndex).trim().toLowerCase())
+    }
+
+    const parenIndex = trimmed.indexOf(" (")
+    if (parenIndex > 0) {
+      aliases.add(trimmed.slice(0, parenIndex).trim().toLowerCase())
+    }
+
+    return aliases
+  }
+
+  function resolveAgentRecord(agents: Record<string, Info>, requested: string) {
+    const exact = agents[requested]
+    if (exact) return exact
+
+    const normalizedRequested = normalizeAgentLookupValue(requested)
+    if (!normalizedRequested) return undefined
+
+    for (const [key, agent] of Object.entries(agents)) {
+      const candidates = new Set<string>([
+        ...getAgentLookupAliases(key),
+        ...getAgentLookupAliases(agent.name),
+      ])
+      if (candidates.has(normalizedRequested)) {
+        return agent
+      }
+    }
+
+    return undefined as any
+  }
+
   export const Info = z
     .object({
       name: z.string(),
@@ -75,8 +125,6 @@ export namespace Agent {
       const config = yield* Config.Service
       const auth = yield* Auth.Service
       const skill = yield* Skill.Service
-      const provider = yield* Provider.Service
-
       const state = yield* InstanceState.make<State>(
         Effect.fn("Agent.state")(function* (ctx) {
           const cfg = yield* config.get()
@@ -247,7 +295,13 @@ export namespace Agent {
                 options: {},
                 native: false,
               }
-            if (value.model) item.model = Provider.parseModel(value.model)
+             if (value.model) {
+               const parsed = Provider.parseModel(value.model)
+               item.model = {
+                 providerID: ProviderID.make(parsed.providerID),
+                 modelID: ModelID.make(parsed.modelID),
+               } as any
+             }
             item.variant = value.variant ?? item.variant
             item.prompt = value.prompt ?? item.prompt
             item.description = value.description ?? item.description
@@ -279,7 +333,7 @@ export namespace Agent {
           }
 
           const get = Effect.fnUntraced(function* (agent: string) {
-            return agents[agent]
+            return resolveAgentRecord(agents, agent) as Info
           })
 
           const list = Effect.fnUntraced(function* () {
@@ -331,9 +385,9 @@ export namespace Agent {
           model?: { providerID: ProviderID; modelID: ModelID }
         }) {
           const cfg = yield* config.get()
-          const model = input.model ?? (yield* provider.defaultModel())
-          const resolved = yield* provider.getModel(model.providerID, model.modelID)
-          const language = yield* provider.getLanguage(resolved)
+          const model = input.model ?? (yield* Effect.promise(() => Provider.defaultModel()))
+          const resolved = yield* Effect.promise(() => Provider.getModel(model.providerID, model.modelID))
+          const language = yield* Effect.promise(() => Provider.getLanguage(resolved))
 
           const system = [PROMPT_GENERATE]
           yield* Effect.promise(() =>
@@ -400,7 +454,6 @@ export namespace Agent {
 
   export const defaultLayer = Layer.suspend(() =>
     layer.pipe(
-      Layer.provide(Provider.defaultLayer),
       Layer.provide(Auth.defaultLayer),
       Layer.provide(Config.defaultLayer),
       Layer.provide(Skill.defaultLayer),

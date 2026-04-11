@@ -4,15 +4,19 @@ import type { MessageV2 } from "../session/message-v2"
 import type { Permission } from "../permission"
 import type { SessionID, MessageID } from "../session/schema"
 import { Truncate } from "./truncate"
-import { Agent } from "@/agent/agent"
 
 export namespace Tool {
+  type AgentInfo = {
+    id?: string
+    [key: string]: unknown
+  }
+
   interface Metadata {
     [key: string]: any
   }
 
   // TODO: remove this hack
-  export type DynamicDescription = (agent: Agent.Info) => Effect.Effect<string>
+  export type DynamicDescription = (agent: AgentInfo) => Effect.Effect<string>
 
   export type Context<M extends Metadata = Metadata> = {
     sessionID: SessionID
@@ -90,6 +94,7 @@ export namespace Tool {
         if (result.metadata.truncated !== undefined) {
           return result
         }
+        const { Agent } = await import("@/agent/agent")
         const truncated = await Truncate.output(result.output, {}, await Agent.get(ctx.agent))
         return {
           ...result,

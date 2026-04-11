@@ -248,6 +248,10 @@ export namespace Instruction {
     return runPromise((svc) => svc.systemPaths())
   }
 
+  export async function system() {
+    return runPromise((svc) => svc.system())
+  }
+
   export function loaded(messages: MessageV2.WithParts[]) {
     return extract(messages)
   }
@@ -256,3 +260,5 @@ export namespace Instruction {
     return runPromise((svc) => svc.resolve(messages, filepath, messageID))
   }
 }
+
+export const InstructionPrompt = Instruction

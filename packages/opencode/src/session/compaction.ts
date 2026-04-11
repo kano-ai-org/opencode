@@ -2,6 +2,7 @@ import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { Session } from "."
 import { SessionID, MessageID, PartID } from "./schema"
+import { ModelID, ProviderID } from "../provider/schema"
 import { Instance } from "../project/instance"
 import { Provider } from "../provider/provider"
 import { MessageV2 } from "./message-v2"
@@ -14,7 +15,6 @@ import { Agent } from "@/agent/agent"
 import { Plugin } from "@/plugin"
 import { Config } from "@/config/config"
 import { NotFoundError } from "@/storage/db"
-import { ModelID, ProviderID } from "@/provider/schema"
 import { Effect, Layer, ServiceMap } from "effect"
 import { makeRuntime } from "@/effect/run-service"
 import { InstanceState } from "@/effect/instance-state"
@@ -69,7 +69,6 @@ export namespace SessionCompaction {
     | Agent.Service
     | Plugin.Service
     | SessionProcessor.Service
-    | Provider.Service
   > = Layer.effect(
     Service,
     Effect.gen(function* () {
@@ -79,7 +78,6 @@ export namespace SessionCompaction {
       const agents = yield* Agent.Service
       const plugin = yield* Plugin.Service
       const processors = yield* SessionProcessor.Service
-      const provider = yield* Provider.Service
 
       const isOverflow = Effect.fn("SessionCompaction.isOverflow")(function* (input: {
         tokens: MessageV2.Assistant["tokens"]
@@ -178,8 +176,8 @@ export namespace SessionCompaction {
 
         const agent = yield* agents.get("compaction")
         const model = agent.model
-          ? yield* provider.getModel(agent.model.providerID, agent.model.modelID)
-          : yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID)
+          ? yield* Effect.promise(() => Provider.getModel(agent.model.providerID, agent.model.modelID))
+          : yield* Effect.promise(() => Provider.getModel(userMessage.model.providerID, userMessage.model.modelID))
         // Allow plugins to inject context or replace compaction prompt.
         const compacting = yield* plugin.trigger(
           "experimental.session.compacting",
@@ -234,18 +232,18 @@ When constructing the summary, try to stick to this template:
             cwd: ctx.directory,
             root: ctx.worktree,
           },
-          cost: 0,
-          tokens: {
-            output: 0,
-            input: 0,
-            reasoning: 0,
-            cache: { read: 0, write: 0 },
-          },
-          modelID: model.id,
-          providerID: model.providerID,
-          time: {
-            created: Date.now(),
-          },
+           cost: 0,
+           tokens: {
+             output: 0,
+             input: 0,
+             reasoning: 0,
+             cache: { read: 0, write: 0 },
+           },
+           modelID: ModelID.make(model.id),
+           providerID: ProviderID.make(model.providerID),
+           time: {
+             created: Date.now(),
+           },
         }
         yield* session.updateMessage(msg)
         const processor = yield* processors.create({
@@ -380,7 +378,6 @@ When constructing the summary, try to stick to this template:
   export const defaultLayer = Layer.unwrap(
     Effect.sync(() =>
       layer.pipe(
-        Layer.provide(Provider.defaultLayer),
         Layer.provide(Session.defaultLayer),
         Layer.provide(SessionProcessor.defaultLayer),
         Layer.provide(Agent.defaultLayer),

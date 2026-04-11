@@ -7,7 +7,7 @@ import { Observability } from "./oltp"
 
 export const memoMap = Layer.makeMemoMapUnsafe()
 
-function attach<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> {
+export function attach<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> {
   try {
     const ctx = Instance.current
     return Effect.provideService(effect, InstanceRef, ctx)

@@ -1,4 +1,4 @@
-import { Cause, Deferred, Effect, Layer, ServiceMap } from "effect"
+import { Cause, Effect, Layer, ServiceMap } from "effect"
 import * as Stream from "effect/Stream"
 import { Agent } from "@/agent/agent"
 import { Bus } from "@/bus"
@@ -18,8 +18,8 @@ import { SessionStatus } from "./status"
 import { SessionSummary } from "./summary"
 import type { Provider } from "@/provider/provider"
 import { Question } from "@/question"
-import { errorMessage } from "@/util/error"
-import { isRecord } from "@/util/record"
+import { attach, makeRuntime, memoMap } from "@/effect/run-service"
+import { ManagedRuntime } from "effect"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
@@ -31,19 +31,8 @@ export namespace SessionProcessor {
 
   export interface Handle {
     readonly message: MessageV2.Assistant
-    readonly updateToolCall: (
-      toolCallID: string,
-      update: (part: MessageV2.ToolPart) => MessageV2.ToolPart,
-    ) => Effect.Effect<MessageV2.ToolPart | undefined>
-    readonly completeToolCall: (
-      toolCallID: string,
-      output: {
-        title: string
-        metadata: Record<string, any>
-        output: string
-        attachments?: MessageV2.FilePart[]
-      },
-    ) => Effect.Effect<void>
+    readonly partFromToolCall: (toolCallID: string) => MessageV2.ToolPart | undefined
+    readonly abort: () => Effect.Effect<void>
     readonly process: (streamInput: LLM.StreamInput) => Effect.Effect<Result>
   }
 
@@ -57,15 +46,8 @@ export namespace SessionProcessor {
     readonly create: (input: Input) => Effect.Effect<Handle>
   }
 
-  type ToolCall = {
-    partID: MessageV2.ToolPart["id"]
-    messageID: MessageV2.ToolPart["messageID"]
-    sessionID: MessageV2.ToolPart["sessionID"]
-    done: Deferred.Deferred<void>
-  }
-
   interface ProcessorContext extends Input {
-    toolcalls: Record<string, ToolCall>
+    toolcalls: Record<string, MessageV2.ToolPart>
     shouldBreak: boolean
     snapshot: string | undefined
     blocked: boolean
@@ -104,17 +86,13 @@ export namespace SessionProcessor {
       const status = yield* SessionStatus.Service
 
       const create = Effect.fn("SessionProcessor.create")(function* (input: Input) {
-        // Pre-capture snapshot before the LLM stream starts. The AI SDK
-        // may execute tools internally before emitting start-step events,
-        // so capturing inside the event handler can be too late.
-        const initialSnapshot = yield* snapshot.track()
         const ctx: ProcessorContext = {
           assistantMessage: input.assistantMessage,
           sessionID: input.sessionID,
           model: input.model,
           toolcalls: {},
           shouldBreak: false,
-          snapshot: initialSnapshot,
+          snapshot: undefined,
           blocked: false,
           needsCompaction: false,
           currentText: undefined,
@@ -124,91 +102,9 @@ export namespace SessionProcessor {
 
         const parse = (e: unknown) =>
           MessageV2.fromError(e, {
-            providerID: input.model.providerID,
+            providerID: input.model.providerID as any,
             aborted,
           })
-
-        const settleToolCall = Effect.fn("SessionProcessor.settleToolCall")(function* (toolCallID: string) {
-          const done = ctx.toolcalls[toolCallID]?.done
-          delete ctx.toolcalls[toolCallID]
-          if (done) yield* Deferred.succeed(done, undefined).pipe(Effect.ignore)
-        })
-
-        const readToolCall = Effect.fn("SessionProcessor.readToolCall")(function* (toolCallID: string) {
-          const call = ctx.toolcalls[toolCallID]
-          if (!call) return
-          const part = yield* session.getPart({
-            partID: call.partID,
-            messageID: call.messageID,
-            sessionID: call.sessionID,
-          })
-          if (!part || part.type !== "tool") {
-            delete ctx.toolcalls[toolCallID]
-            return
-          }
-          return { call, part }
-        })
-
-        const updateToolCall = Effect.fn("SessionProcessor.updateToolCall")(function* (
-          toolCallID: string,
-          update: (part: MessageV2.ToolPart) => MessageV2.ToolPart,
-        ) {
-          const match = yield* readToolCall(toolCallID)
-          if (!match) return
-          const part = yield* session.updatePart(update(match.part))
-          ctx.toolcalls[toolCallID] = {
-            ...match.call,
-            partID: part.id,
-            messageID: part.messageID,
-            sessionID: part.sessionID,
-          }
-          return part
-        })
-
-        const completeToolCall = Effect.fn("SessionProcessor.completeToolCall")(function* (
-          toolCallID: string,
-          output: {
-            title: string
-            metadata: Record<string, any>
-            output: string
-            attachments?: MessageV2.FilePart[]
-          },
-        ) {
-          const match = yield* readToolCall(toolCallID)
-          if (!match || match.part.state.status !== "running") return
-          yield* session.updatePart({
-            ...match.part,
-            state: {
-              status: "completed",
-              input: match.part.state.input,
-              output: output.output,
-              metadata: output.metadata,
-              title: output.title,
-              time: { start: match.part.state.time.start, end: Date.now() },
-              attachments: output.attachments,
-            },
-          })
-          yield* settleToolCall(toolCallID)
-        })
-
-        const failToolCall = Effect.fn("SessionProcessor.failToolCall")(function* (toolCallID: string, error: unknown) {
-          const match = yield* readToolCall(toolCallID)
-          if (!match || match.part.state.status !== "running") return false
-          yield* session.updatePart({
-            ...match.part,
-            state: {
-              status: "error",
-              input: match.part.state.input,
-              error: errorMessage(error),
-              time: { start: match.part.state.time.start, end: Date.now() },
-            },
-          })
-          if (error instanceof Permission.RejectedError || error instanceof Question.RejectedError) {
-            ctx.blocked = ctx.shouldBreak
-          }
-          yield* settleToolCall(toolCallID)
-          return true
-        })
 
         const handleEvent = Effect.fn("SessionProcessor.handleEvent")(function* (value: StreamEvent) {
           switch (value.type) {
@@ -256,22 +152,15 @@ export namespace SessionProcessor {
               if (ctx.assistantMessage.summary) {
                 throw new Error(`Tool call not allowed while generating summary: ${value.toolName}`)
               }
-              const part = yield* session.updatePart({
-                id: ctx.toolcalls[value.id]?.partID ?? PartID.ascending(),
+              ctx.toolcalls[value.id] = (yield* session.updatePart({
+                id: ctx.toolcalls[value.id]?.id ?? PartID.ascending(),
                 messageID: ctx.assistantMessage.id,
                 sessionID: ctx.assistantMessage.sessionID,
                 type: "tool",
                 tool: value.toolName,
                 callID: value.id,
                 state: { status: "pending", input: {}, raw: "" },
-                metadata: value.providerExecuted ? { providerExecuted: true } : undefined,
-              } satisfies MessageV2.ToolPart)
-              ctx.toolcalls[value.id] = {
-                done: yield* Deferred.make<void>(),
-                partID: part.id,
-                messageID: part.messageID,
-                sessionID: part.sessionID,
-              }
+              })) as any
               return
 
             case "tool-input-delta":
@@ -284,21 +173,16 @@ export namespace SessionProcessor {
               if (ctx.assistantMessage.summary) {
                 throw new Error(`Tool call not allowed while generating summary: ${value.toolName}`)
               }
-              yield* updateToolCall(value.toolCallId, (match) => ({
+              const match = ctx.toolcalls[value.toolCallId]
+              if (!match) return
+              ctx.toolcalls[value.toolCallId] = yield* session.updatePart({
                 ...match,
                 tool: value.toolName,
-                state: {
-                  ...match.state,
-                  status: "running",
-                  input: value.input,
-                  time: { start: Date.now() },
-                },
-                metadata: match.metadata?.providerExecuted
-                  ? { ...value.providerMetadata, providerExecuted: true }
-                  : value.providerMetadata,
-              }))
+                state: { status: "running", input: value.input, time: { start: Date.now() } },
+                metadata: value.providerMetadata,
+              } as any) as any
 
-              const parts = MessageV2.parts(ctx.assistantMessage.id)
+              const parts = yield* Effect.sync(() => MessageV2.parts(ctx.assistantMessage.id))
               const recentParts = parts.slice(-DOOM_LOOP_THRESHOLD)
 
               if (
@@ -327,12 +211,40 @@ export namespace SessionProcessor {
             }
 
             case "tool-result": {
-              yield* completeToolCall(value.toolCallId, value.output)
+              const match = ctx.toolcalls[value.toolCallId]
+              if (!match || match.state.status !== "running") return
+              yield* session.updatePart({
+                ...match,
+                state: {
+                  status: "completed",
+                  input: value.input ?? match.state.input,
+                  output: value.output.output,
+                  metadata: value.output.metadata,
+                  title: value.output.title,
+                  time: { start: match.state.time.start, end: Date.now() },
+                  attachments: value.output.attachments,
+                },
+              })
+              delete ctx.toolcalls[value.toolCallId]
               return
             }
 
             case "tool-error": {
-              yield* failToolCall(value.toolCallId, value.error)
+              const match = ctx.toolcalls[value.toolCallId]
+              if (!match || match.state.status !== "running") return
+              yield* session.updatePart({
+                ...match,
+                state: {
+                  status: "error",
+                  input: value.input ?? match.state.input,
+                  error: value.error instanceof Error ? value.error.message : String(value.error),
+                  time: { start: match.state.time.start, end: Date.now() },
+                },
+              })
+              if (value.error instanceof Permission.RejectedError || value.error instanceof Question.RejectedError) {
+                ctx.blocked = ctx.shouldBreak
+              }
+              delete ctx.toolcalls[value.toolCallId]
               return
             }
 
@@ -340,7 +252,7 @@ export namespace SessionProcessor {
               throw value.error
 
             case "start-step":
-              if (!ctx.snapshot) ctx.snapshot = yield* snapshot.track()
+              ctx.snapshot = yield* snapshot.track()
               yield* session.updatePart({
                 id: PartID.ascending(),
                 messageID: ctx.assistantMessage.id,
@@ -435,10 +347,7 @@ export namespace SessionProcessor {
                 },
                 { text: ctx.currentText.text },
               )).text
-              {
-                const end = Date.now()
-                ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
-              }
+              ctx.currentText.time = { start: Date.now(), end: Date.now() }
               if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
               yield* session.updatePart(ctx.currentText)
               ctx.currentText = undefined
@@ -485,30 +394,19 @@ export namespace SessionProcessor {
           }
           ctx.reasoningMap = {}
 
-          yield* Effect.forEach(
-            Object.values(ctx.toolcalls),
-            (call) => Deferred.await(call.done).pipe(Effect.timeout("250 millis"), Effect.ignore),
-            { concurrency: "unbounded" },
-          )
-
-          for (const toolCallID of Object.keys(ctx.toolcalls)) {
-            const match = yield* readToolCall(toolCallID)
-            if (!match) continue
-            const part = match.part
-            const end = Date.now()
-            const metadata = "metadata" in part.state && isRecord(part.state.metadata) ? part.state.metadata : {}
+          const parts = yield* Effect.sync(() => MessageV2.parts(ctx.assistantMessage.id))
+          for (const part of parts) {
+            if (part.type !== "tool" || part.state.status === "completed" || part.state.status === "error") continue
             yield* session.updatePart({
               ...part,
               state: {
                 ...part.state,
                 status: "error",
                 error: "Tool execution aborted",
-                metadata: { ...metadata, interrupted: true },
-                time: { start: "time" in part.state ? part.state.time.start : end, end },
+                time: { start: Date.now(), end: Date.now() },
               },
             })
           }
-          ctx.toolcalls = {}
           ctx.assistantMessage.time.completed = Date.now()
           yield* session.updateMessage(ctx.assistantMessage)
         })
@@ -529,34 +427,37 @@ export namespace SessionProcessor {
           yield* status.set(ctx.sessionID, { type: "idle" })
         })
 
-        const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
-          log.info("process")
-          ctx.needsCompaction = false
-          ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
+        const abort = Effect.fn("SessionProcessor.abort")(() =>
+          Effect.gen(function* () {
+            if (!ctx.assistantMessage.error) {
+              yield* halt(new DOMException("Aborted", "AbortError"))
+            }
+            if (!ctx.assistantMessage.time.completed) {
+              yield* cleanup()
+              return
+            }
+            yield* session.updateMessage(ctx.assistantMessage)
+          }),
+        )
 
-          return yield* Effect.gen(function* () {
-            yield* Effect.gen(function* () {
-              ctx.currentText = undefined
-              ctx.reasoningMap = {}
-              const stream = llm.stream(streamInput)
+        const process = (streamInput: LLM.StreamInput): Effect.Effect<Result> =>
+          Effect.gen(function* () {
+            log.info("process")
+            ctx.needsCompaction = false
+            ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
+            ctx.currentText = undefined
+            ctx.reasoningMap = {}
 
-              yield* stream.pipe(
-                Stream.tap((event) => handleEvent(event)),
-                Stream.takeUntil(() => ctx.needsCompaction),
-                Stream.runDrain,
-              )
-            }).pipe(
-              Effect.onInterrupt(() =>
-                Effect.gen(function* () {
-                  aborted = true
-                  if (!ctx.assistantMessage.error) {
-                    yield* halt(new DOMException("Aborted", "AbortError"))
-                  }
-                }),
-              ),
+            const stream = llm.stream(streamInput)
+            yield* stream.pipe(
+              Stream.tap((event) => handleEvent(event)),
+              Stream.takeUntil(() => ctx.needsCompaction),
+              Stream.runDrain,
+            ).pipe(
+              Effect.onInterrupt(() => Effect.sync(() => void (aborted = true))),
               Effect.catchCauseIf(
                 (cause) => !Cause.hasInterruptsOnly(cause),
-                (cause) => Effect.fail(Cause.squash(cause)),
+                (cause) => Effect.fail(Cause.squash(cause) as any),
               ),
               Effect.retry(
                 SessionRetry.policy({
@@ -570,27 +471,30 @@ export namespace SessionProcessor {
                     }),
                 }),
               ),
-              Effect.catch(halt),
               Effect.ensuring(cleanup()),
-            )
+            ) as any
 
-            if (ctx.needsCompaction) return "compact"
-            if (ctx.blocked || ctx.assistantMessage.error) return "stop"
-            return "continue"
-          })
-        })
+            if (aborted && !ctx.assistantMessage.error) {
+              yield* abort()
+            }
+            if (ctx.needsCompaction) return "compact" as const
+            if (ctx.blocked || ctx.assistantMessage.error || aborted) return "stop" as const
+            return "continue" as const
+          }).pipe(Effect.onInterrupt(() => abort().pipe(Effect.asVoid))) as any
 
         return {
           get message() {
             return ctx.assistantMessage
           },
-          updateToolCall,
-          completeToolCall,
+          partFromToolCall(toolCallID: string) {
+            return ctx.toolcalls[toolCallID]
+          },
+          abort,
           process,
         } satisfies Handle
       })
 
-      return Service.of({ create })
+      return Service.of({ create: (input: Input) => create(input) })
     }),
   )
 
@@ -601,7 +505,7 @@ export namespace SessionProcessor {
         Layer.provide(Snapshot.defaultLayer),
         Layer.provide(Agent.defaultLayer),
         Layer.provide(LLM.defaultLayer),
-        Layer.provide(Permission.defaultLayer),
+        Layer.provide(Permission.layer),
         Layer.provide(Plugin.defaultLayer),
         Layer.provide(SessionStatus.layer.pipe(Layer.provide(Bus.layer))),
         Layer.provide(Bus.layer),
@@ -609,4 +513,31 @@ export namespace SessionProcessor {
       ),
     ),
   )
+
+  const { runPromise } = makeRuntime(Service, defaultLayer)
+  let runtime: ManagedRuntime.ManagedRuntime<Service, never> | undefined
+  const getRuntime = () => (runtime ??= ManagedRuntime.make(defaultLayer, { memoMap }))
+
+  export async function create(input: Input): Promise<{
+    readonly message: MessageV2.Assistant
+    readonly partFromToolCall: (toolCallID: string) => MessageV2.ToolPart | undefined
+    readonly abort: () => Promise<void>
+    readonly process: (streamInput: LLM.StreamInput) => Promise<Result>
+  }> {
+    const handle = await runPromise((svc) => svc.create(input))
+    return {
+      get message() {
+        return handle.message
+      },
+      partFromToolCall(toolCallID) {
+        return handle.partFromToolCall(toolCallID)
+      },
+      abort() {
+        return getRuntime().runPromise(attach(handle.abort()))
+      },
+      process(streamInput) {
+        return getRuntime().runPromise(attach(handle.process(streamInput)))
+      },
+    }
+  }
 }

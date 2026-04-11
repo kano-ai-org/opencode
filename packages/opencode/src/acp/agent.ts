@@ -1628,10 +1628,20 @@ export namespace ACP {
 
     if (specified && providers.length) {
       const provider = providers.find((p) => p.id === specified.providerID)
-      if (provider && provider.models[specified.modelID]) return specified
+      if (provider && provider.models[specified.modelID]) {
+        return {
+          providerID: ProviderID.make(specified.providerID),
+          modelID: ModelID.make(specified.modelID),
+        } as any
+      }
     }
 
-    if (specified && !providers.length) return specified
+    if (specified && !providers.length) {
+      return {
+        providerID: ProviderID.make(specified.providerID),
+        modelID: ModelID.make(specified.modelID),
+      } as any
+    }
 
     const opencodeProvider = providers.find((p) => p.id === "opencode")
     if (opencodeProvider) {
@@ -1656,7 +1666,12 @@ export namespace ACP {
       }
     }
 
-    if (specified) return specified
+    if (specified) {
+      return {
+        providerID: ProviderID.make(specified.providerID),
+        modelID: ModelID.make(specified.modelID),
+      } as any
+    }
 
     return { providerID: ProviderID.opencode, modelID: ModelID.make("big-pickle") }
   }
@@ -1739,7 +1754,7 @@ export namespace ACP {
       const unsorted: Array<{ id: string; name: string; variants?: Record<string, any> }> = Object.values(
         provider.models,
       )
-      const models = Provider.sort(unsorted)
+       const models = Provider.sort(unsorted as any)
       return models.flatMap((model) => {
         const base: ModelOption = {
           modelId: `${provider.id}/${model.id}`,
@@ -1788,12 +1803,24 @@ export namespace ACP {
     const parsed = Provider.parseModel(modelId)
     const provider = providers.find((p) => p.id === parsed.providerID)
     if (!provider) {
-      return { model: parsed, variant: undefined }
+      return {
+        model: {
+          providerID: ProviderID.make(parsed.providerID),
+          modelID: ModelID.make(parsed.modelID),
+        },
+        variant: undefined,
+      } as any
     }
 
     // Check if modelID exists directly
     if (provider.models[parsed.modelID]) {
-      return { model: parsed, variant: undefined }
+      return {
+        model: {
+          providerID: ProviderID.make(parsed.providerID),
+          modelID: ModelID.make(parsed.modelID),
+        },
+        variant: undefined,
+      } as any
     }
 
     // Try to extract variant from end of modelID (e.g., "claude-sonnet-4/high" -> model: "claude-sonnet-4", variant: "high")
@@ -1804,13 +1831,22 @@ export namespace ACP {
       const baseModelInfo = provider.models[baseModelId]
       if (baseModelInfo?.variants && candidateVariant in baseModelInfo.variants) {
         return {
-          model: { providerID: parsed.providerID, modelID: ModelID.make(baseModelId) },
+          model: {
+            providerID: ProviderID.make(parsed.providerID),
+            modelID: ModelID.make(baseModelId),
+          },
           variant: candidateVariant,
-        }
+        } as any
       }
     }
 
-    return { model: parsed, variant: undefined }
+    return {
+      model: {
+        providerID: ProviderID.make(parsed.providerID),
+        modelID: ModelID.make(parsed.modelID),
+      },
+      variant: undefined,
+    } as any
   }
 
   function buildConfigOptions(input: {
