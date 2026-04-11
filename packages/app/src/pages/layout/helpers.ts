@@ -69,6 +69,21 @@ export const childMapByParent = (sessions: Session[]) => {
   return map
 }
 
+export const childSessionOnPath = (sessions: Session[], rootID: string, targetID: string) => {
+  if (rootID === targetID) return
+
+  const byID = new Map(sessions.map((session) => [session.id, session]))
+  const visited = new Set<string>()
+  let current = byID.get(targetID)
+
+  while (current?.parentID) {
+    if (visited.has(current.id)) return
+    visited.add(current.id)
+    if (current.parentID === rootID) return current
+    current = byID.get(current.parentID)
+  }
+}
+
 export function getDraggableId(event: unknown): string | undefined {
   if (typeof event !== "object" || event === null) return undefined
   if (!("draggable" in event)) return undefined
