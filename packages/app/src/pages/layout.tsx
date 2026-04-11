@@ -154,6 +154,7 @@ export default function Layout(props: ParentProps) {
     autoselect: !initialDirectory,
     busyWorkspaces: {} as Record<string, boolean>,
     hoverProject: undefined as string | undefined,
+    hoverSession: undefined as string | undefined,
     scrollSessionKey: undefined as string | undefined,
     nav: undefined as HTMLElement | undefined,
     sortNow: Date.now(),
@@ -1009,6 +1010,34 @@ export default function Layout(props: ParentProps) {
         navigate(`/${params.dir}/session`)
       }
     }
+  }
+
+  async function renameSession(session: Session, next: string) {
+    const title = next.trim()
+    if (!title || title === session.title) return
+
+    const [, setStore] = globalSync.child(session.directory)
+
+    await globalSDK.client.session
+      .update({
+        directory: session.directory,
+        sessionID: session.id,
+        title,
+      })
+      .then(() => {
+        setStore(
+          produce((draft) => {
+            const index = draft.session.findIndex((item) => item.id === session.id)
+            if (index !== -1) draft.session[index].title = title
+          }),
+        )
+      })
+      .catch((err) => {
+        showToast({
+          title: language.t("common.requestFailed"),
+          description: errorMessage(err, language.t("common.requestFailed")),
+        })
+      })
   }
 
   command.register("layout", () => {
@@ -1966,12 +1995,15 @@ export default function Layout(props: ParentProps) {
 
   const workspaceSidebarCtx: WorkspaceSidebarContext = {
     currentDir,
-    navList: currentSessions,
     sidebarExpanded,
     sidebarHovering,
+    nav: () => state.nav,
+    hoverSession: () => state.hoverSession,
+    setHoverSession: (id) => setState("hoverSession", id),
     clearHoverProjectSoon,
     prefetchSession,
     archiveSession,
+    renameSession,
     workspaceName,
     renameWorkspace,
     editorOpen,
@@ -2013,11 +2045,18 @@ export default function Layout(props: ParentProps) {
     workspaceIds,
     workspaceLabel,
     sessionProps: {
-      navList: currentSessions,
       sidebarExpanded,
+      sidebarHovering,
+      nav: () => state.nav,
+      hoverSession: () => state.hoverSession,
+      setHoverSession: (id) => setState("hoverSession", id),
       clearHoverProjectSoon,
       prefetchSession,
       archiveSession,
+      renameSession,
+      editorOpen,
+      openEditor,
+      InlineEditor,
     },
   }
 
