@@ -47,6 +47,7 @@ import { Bus } from "../bus"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill"
 import { Permission } from "@/permission"
+import { makeRuntime } from "@/effect/run-service"
 
 const log = Log.create({ service: "tool.registry" })
 
@@ -347,3 +348,21 @@ export const defaultLayer = Layer.suspend(() =>
     Layer.provide(Truncate.defaultLayer),
   ),
 )
+
+const { runPromise } = makeRuntime(Service, defaultLayer)
+
+export async function ids() {
+  return runPromise((svc) => svc.ids())
+}
+
+export async function named() {
+  return runPromise((svc) => svc.named())
+}
+
+export async function tools(input: {
+  providerID: ProviderID
+  modelID: ModelID
+  agent: Agent.Info
+}): Promise<Tool.Def[]> {
+  return runPromise((svc) => svc.tools(input))
+}

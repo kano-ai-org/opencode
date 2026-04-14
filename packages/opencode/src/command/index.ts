@@ -8,6 +8,7 @@ import z from "zod"
 import { Config } from "../config"
 import { MCP } from "../mcp"
 import { Skill } from "../skill"
+import { makeRuntime } from "@/effect/run-service"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
 
@@ -184,5 +185,15 @@ export const defaultLayer = layer.pipe(
   Layer.provide(MCP.defaultLayer),
   Layer.provide(Skill.defaultLayer),
 )
+
+const { runPromise } = makeRuntime(Service, defaultLayer)
+
+export async function get(name: string) {
+  return runPromise((svc) => svc.get(name))
+}
+
+export async function list() {
+  return runPromise((svc) => svc.list())
+}
 
 export * as Command from "."

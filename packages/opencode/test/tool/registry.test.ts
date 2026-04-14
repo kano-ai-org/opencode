@@ -73,6 +73,19 @@ describe("tool.registry", () => {
     ),
   )
 
+  it.live("returns initialized named builtin tools", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const named = yield* registry.named()
+        expect(named.task.id).toBe("task")
+        expect(typeof named.task.execute).toBe("function")
+        expect(named.read.id).toBe("read")
+        expect(typeof named.read.execute).toBe("function")
+      }),
+    ),
+  )
+
   it.live("loads tools with external dependencies without crashing", () =>
     provideTmpdirInstance((dir) =>
       Effect.gen(function* () {
