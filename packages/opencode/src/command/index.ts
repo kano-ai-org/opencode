@@ -189,6 +189,10 @@ export namespace Command {
 
   const { runPromise } = makeRuntime(Service, defaultLayer)
 
+  export async function get(name: string) {
+    return runPromise((svc) => svc.get(name))
+  }
+
   export async function list() {
     return runPromise((svc) => svc.list())
   }

@@ -78,6 +78,21 @@ describe("tool.registry", () => {
     })
   })
 
+  test("returns initialized named builtin tools", async () => {
+    await using tmp = await tmpdir()
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const named = await ToolRegistry.named()
+        expect(named.task.id).toBe("task")
+        expect(typeof named.task.execute).toBe("function")
+        expect(named.read.id).toBe("read")
+        expect(typeof named.read.execute).toBe("function")
+      },
+    })
+  })
+
   test("loads tools with external dependencies without crashing", async () => {
     await using tmp = await tmpdir({
       init: async (dir) => {

@@ -366,7 +366,7 @@ export namespace SessionPrompt {
       // pending subtask
       // TODO: centralize "invoke tool" logic
       if (task?.type === "subtask") {
-        const taskTool = await TaskTool.init()
+        const { task: taskTool } = await ToolRegistry.named()
         const taskModel = task.model ? await Provider.getModel(task.model.providerID, task.model.modelID) : model
          const assistantMessage = (await Session.updateMessage({
            id: Identifier.ascending("message") as any,
@@ -1123,6 +1123,8 @@ export namespace SessionPrompt {
                 part.mime = "application/x-directory"
               }
 
+              const { read: readTool } = await ToolRegistry.named()
+
               if (part.mime === "text/plain") {
                 let offset: number | undefined = undefined
                 let limit: number | undefined = undefined
@@ -1170,62 +1172,61 @@ export namespace SessionPrompt {
                   },
                 ]
 
-                await ReadTool.init()
-                  .then(async (t) => {
-                    const model = await Provider.getModel(info.model.providerID, info.model.modelID)
-                    const readCtx: Tool.Context = {
-                      sessionID: input.sessionID as any,
-                      abort: new AbortController().signal,
-                      agent: input.agent!,
-                      messageID: info.id,
-                      extra: { bypassCwdCheck: true, model },
-                      messages: [],
-                      metadata: async () => {},
-                      ask: async () => {},
-                    }
-                    const result = await t.execute(args, readCtx)
-                    pieces.push({
-                      messageID: info.id,
-                      sessionID: input.sessionID as any,
-                      type: "text",
-                      synthetic: true,
-                      text: result.output,
-                    })
-                    if (result.attachments?.length) {
-                      pieces.push(
-                        ...result.attachments.map((attachment) => ({
-                          ...attachment,
-                          synthetic: true,
-                          filename: attachment.filename ?? part.filename,
-                          messageID: info.id,
-                          sessionID: input.sessionID as any,
-                        })),
-                      )
-                    } else {
-                      pieces.push({
-                        ...part,
+                try {
+                  const model =
+                    "model" in info ? await Provider.getModel(info.model.providerID, info.model.modelID) : undefined
+                  const readCtx: Tool.Context = {
+                    sessionID: input.sessionID as any,
+                    abort: new AbortController().signal,
+                    agent: input.agent!,
+                    messageID: info.id,
+                    extra: { bypassCwdCheck: true, ...(model ? { model } : {}) },
+                    messages: [],
+                    metadata: async () => {},
+                    ask: async () => {},
+                  }
+                  const result = await readTool.execute(args, readCtx)
+                  pieces.push({
+                    messageID: info.id,
+                    sessionID: input.sessionID as any,
+                    type: "text",
+                    synthetic: true,
+                    text: result.output,
+                  })
+                  if (result.attachments?.length) {
+                    pieces.push(
+                      ...result.attachments.map((attachment) => ({
+                        ...attachment,
+                        synthetic: true,
+                        filename: attachment.filename ?? part.filename,
                         messageID: info.id,
                         sessionID: input.sessionID as any,
-                      })
-                    }
-                  })
-                  .catch((error) => {
-                    log.error("failed to read file", { error })
-                    const message = error instanceof Error ? error.message : error.toString()
-                    Bus.publish(Session.Event.Error, {
-                      sessionID: input.sessionID as any,
-                      error: new NamedError.Unknown({
-                        message,
-                      }).toObject(),
-                    })
+                      })),
+                    )
+                  } else {
                     pieces.push({
+                      ...part,
                       messageID: info.id,
                       sessionID: input.sessionID as any,
-                      type: "text",
-                      synthetic: true,
-                      text: `Read tool failed to read ${filepath} with the following error: ${message}`,
                     })
+                  }
+                } catch (error) {
+                  log.error("failed to read file", { error })
+                  const message = error instanceof Error ? error.message : String(error)
+                  Bus.publish(Session.Event.Error, {
+                    sessionID: input.sessionID as any,
+                    error: new NamedError.Unknown({
+                      message,
+                    }).toObject(),
                   })
+                  pieces.push({
+                    messageID: info.id,
+                    sessionID: input.sessionID as any,
+                    type: "text",
+                    synthetic: true,
+                    text: `Read tool failed to read ${filepath} with the following error: ${message}`,
+                  })
+                }
 
                 return pieces
               }
@@ -1242,7 +1243,7 @@ export namespace SessionPrompt {
                   metadata: async () => {},
                   ask: async () => {},
                 }
-                const result = await ReadTool.init().then((t) => t.execute(args, listCtx))
+                const result = await readTool.execute(args, listCtx)
                 return [
                   {
                     messageID: info.id,

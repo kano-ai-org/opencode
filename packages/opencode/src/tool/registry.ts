@@ -272,6 +272,10 @@ export namespace ToolRegistry {
     return runPromise((svc) => svc.ids())
   }
 
+  export async function named() {
+    return runPromise((svc) => svc.named())
+  }
+
   export async function tools(input: {
     providerID: ProviderID
     modelID: ModelID
