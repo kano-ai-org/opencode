@@ -616,6 +616,16 @@ export async function prune(input: { sessionID: SessionID }) {
   return runPromise((svc) => svc.prune(input))
 }
 
+export async function process(input: {
+  parentID: MessageID
+  messages: MessageV2.WithParts[]
+  sessionID: SessionID
+  auto: boolean
+  overflow?: boolean
+}) {
+  return runPromise((svc) => svc.process(input))
+}
+
 export const create = fn(
   z.object({
     sessionID: SessionID.zod,
