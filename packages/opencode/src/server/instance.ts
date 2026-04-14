@@ -1,5 +1,6 @@
 import { describeRoute, resolver } from "hono-openapi"
 import { Hono } from "hono"
+import type { UpgradeWebSocket } from "hono/ws"
 import { proxy } from "hono/proxy"
 import z from "zod"
 import { createHash } from "node:crypto"
@@ -40,14 +41,17 @@ const DEFAULT_CSP =
 const csp = (hash = "") =>
   `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:`
 
-const webUIOrigins = () =>
-  [...new Set([Flag.OPENCODE_WEB_UI_ORIGIN, "https://app.opencode.ai"].filter((value): value is string => Boolean(value)).map((value) => value.replace(/\/+$/, "")))]
+const webUIOrigins = () => {
+  const origin = process.env.OPENCODE_WEB_UI_ORIGIN?.replace(/\/+$/, "")
+  if (origin) return [origin]
+  return ["https://app.opencode.ai"]
+}
 
-export const InstanceRoutes = (app?: Hono) =>
-  (app ?? new Hono())
+export const InstanceRoutes = (upgrade?: UpgradeWebSocket, app = new Hono()) =>
+  app
     .onError(errorHandler(log))
     .route("/project", ProjectRoutes())
-    .route("/pty", PtyRoutes())
+    .route("/pty", PtyRoutes(upgrade!))
     .route("/config", ConfigRoutes())
     .route("/experimental", ExperimentalRoutes())
     .route("/session", SessionRoutes())
@@ -266,6 +270,9 @@ export const InstanceRoutes = (app?: Hono) =>
           response.headers.set("X-OpenCode-UI-Origin", ui)
           if (response.headers.get("content-type")?.includes("text/html")) {
             response.headers.set("Content-Security-Policy", DEFAULT_CSP)
+            if (process.env.OPENCODE_WEB_UI_ORIGIN) {
+              response.headers.set("Cache-Control", "no-store")
+            }
           }
           return response
         } catch (error) {
