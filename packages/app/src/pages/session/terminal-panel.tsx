@@ -69,6 +69,7 @@ export function TerminalPanel() {
     on(
       () => terminal.all().length,
       (count, prevCount) => {
+        if (store.autoCreated) return
         if (prevCount === undefined || prevCount <= 0 || count !== 0) return
         if (!opened()) return
         close()
