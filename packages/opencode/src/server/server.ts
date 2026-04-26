@@ -35,7 +35,7 @@ import { lazy } from "../util/lazy"
 import { InstanceBootstrap } from "../project/bootstrap"
 import { NotFoundError } from "../storage/db"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
-import { websocket } from "hono/bun"
+import { upgradeWebSocket, websocket } from "hono/bun"
 import { HTTPException } from "hono/http-exception"
 import { errors } from "./error"
 import { Filesystem } from "@/util/filesystem"
@@ -71,6 +71,8 @@ export namespace Server {
   export function url(): URL {
     return _url ?? new URL("http://localhost:4096")
   }
+
+  export const Default = () => ({ app: App() })
 
   const app = new Hono()
   export const App: () => Hono = lazy(
@@ -261,7 +263,7 @@ export namespace Server {
           ),
         )
         .route("/project", ProjectRoutes())
-        .route("/pty", PtyRoutes())
+        .route("/pty", PtyRoutes(upgradeWebSocket))
         .route("/config", ConfigRoutes())
         .route("/experimental", ExperimentalRoutes())
         .route("/session", SessionRoutes())

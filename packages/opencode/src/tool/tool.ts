@@ -8,7 +8,8 @@ import { Truncate } from "./truncate"
 export namespace Tool {
   type AgentInfo = {
     id?: string
-    [key: string]: unknown
+    permission?: Permission.Ruleset
+    [key: string]: any
   }
 
   interface Metadata {

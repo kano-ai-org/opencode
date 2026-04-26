@@ -182,7 +182,7 @@ export const TaskDescription: Tool.DynamicDescription = (agent) =>
     const items = yield* Effect.promise(() =>
       Agent.list().then((items) => items.filter((item) => item.mode !== "primary")),
     )
-    const filtered = items.filter((item) => Permission.evaluate(id, item.name, agent.permission).action !== "deny")
+    const filtered = items.filter((item) => Permission.evaluate(id, item.name, agent.permission ?? []).action !== "deny")
     const list = filtered.toSorted((a, b) => a.name.localeCompare(b.name))
     const description = list
       .map(

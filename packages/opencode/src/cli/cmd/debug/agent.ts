@@ -5,6 +5,7 @@ import { Provider } from "../../../provider/provider"
 import { Session } from "../../../session"
 import type { MessageV2 } from "../../../session/message-v2"
 import { MessageID, PartID } from "../../../session/schema"
+import { ModelID, ProviderID } from "../../../provider/schema"
 import { ToolRegistry } from "../../../tool/registry"
 import { Instance } from "../../../project/instance"
 import { Permission } from "../../../permission"
@@ -73,6 +74,8 @@ async function getAvailableTools(agent: Agent.Info) {
   const model = agent.model ?? (await Provider.defaultModel())
   return ToolRegistry.tools({
     ...model,
+    providerID: ProviderID.make(String(model.providerID)),
+    modelID: ModelID.make(String(model.modelID)),
     agent,
   })
 }
@@ -127,8 +130,8 @@ async function createToolContext(agent: Agent.Info) {
       created: now,
     },
     parentID: messageID,
-    modelID: model.modelID,
-    providerID: model.providerID,
+    modelID: String(model.modelID),
+    providerID: String(model.providerID),
     mode: "debug",
     agent: agent.name,
     path: {

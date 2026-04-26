@@ -101,7 +101,7 @@ export const SkillTool = Tool.define("skill", async () => {
 
 export const SkillDescription: Tool.DynamicDescription = (agent) =>
   Effect.gen(function* () {
-    const list = yield* Effect.promise(() => Skill.available(agent))
+    const list = yield* Effect.promise(() => Skill.available(agent as any))
     if (list.length === 0) return "No skills are currently available."
     return [
       "Load a specialized skill that provides domain-specific instructions and workflows.",

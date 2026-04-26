@@ -1,7 +1,9 @@
 import { Bus } from "@/bus"
+import { Effect, Layer, ServiceMap } from "effect"
 import { Account } from "@/account"
 import { Config } from "@/config/config"
 import { Provider } from "@/provider/provider"
+import { Snapshot } from "@/snapshot"
 import { ProviderID, ModelID } from "@/provider/schema"
 import { Session } from "@/session"
 import type { SessionID } from "@/session/schema"
@@ -13,6 +15,31 @@ import type * as SDK from "@opencode-ai/sdk/v2"
 
 export namespace ShareNext {
   const log = Log.create({ service: "share-next" })
+
+  export interface Interface {
+    readonly init: () => Effect.Effect<void>
+    readonly url: () => Effect.Effect<string>
+    readonly request: () => Effect.Effect<Awaited<ReturnType<typeof request>>>
+    readonly create: (sessionID: SessionID) => Effect.Effect<Awaited<ReturnType<typeof create>>>
+    readonly remove: (sessionID: SessionID) => Effect.Effect<void>
+    readonly sync: (sessionID: SessionID, data: Data[]) => Effect.Effect<void>
+  }
+
+  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/ShareNext") {}
+
+  export const layer = Layer.succeed(
+    Service,
+    Service.of({
+      init: () => Effect.promise(() => init()),
+      url: () => Effect.promise(() => url()),
+      request: () => Effect.promise(() => request()),
+      create: (sessionID) => Effect.promise(() => create(sessionID)),
+      remove: (sessionID) => Effect.promise(() => remove(sessionID)),
+      sync: (sessionID, data) => Effect.promise(() => sync(sessionID, data)),
+    }),
+  )
+
+  export const defaultLayer = layer
 
   type ApiEndpoints = {
     create: string
@@ -164,7 +191,7 @@ export namespace ShareNext {
       }
     | {
         type: "session_diff"
-        data: SDK.FileDiff[]
+        data: Snapshot.FileDiff[]
       }
     | {
         type: "model"

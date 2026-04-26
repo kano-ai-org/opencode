@@ -465,6 +465,10 @@ export namespace Account {
     return runPromise((service) => service.orgsByAccount())
   }
 
+  export async function token(accountID: AccountID) {
+    return Option.getOrUndefined(await runPromise((service) => service.token(accountID)))
+  }
+
   export async function switchOrg(accountID: AccountID, orgID: OrgID) {
     return runPromise((service) => service.use(accountID, Option.some(orgID)))
   }

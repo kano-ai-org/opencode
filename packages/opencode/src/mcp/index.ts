@@ -920,4 +920,7 @@ export namespace MCP {
   export const hasStoredTokens = async (mcpName: string) => runPromise((svc) => svc.hasStoredTokens(mcpName))
 
   export const getAuthStatus = async (mcpName: string) => runPromise((svc) => svc.getAuthStatus(mcpName))
+
+  export const readResource = async (clientName: string, resourceUri: string) =>
+    runPromise((svc) => svc.readResource(clientName, resourceUri))
 }

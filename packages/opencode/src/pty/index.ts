@@ -359,11 +359,9 @@ export namespace Pty {
     }),
   )
 
-  const defaultLayer = Plugin?.defaultLayer
-    ? layer.pipe(Layer.provide(Bus.layer), Layer.provide(Plugin.defaultLayer))
-    : layer.pipe(Layer.provide(Bus.layer))
+  const getDefaultLayer = () => layer.pipe(Layer.provide(Bus.layer), Layer.provide(Plugin.defaultLayer))
 
-  const { runPromise } = makeRuntime(Service, defaultLayer)
+  const { runPromise } = makeRuntime(Service, getDefaultLayer)
 
   export async function list() {
     return runPromise((svc) => svc.list())
