@@ -455,14 +455,27 @@ export default function Layout(props: ParentProps) {
           return
         }
 
-        if (e.details?.type !== "permission.asked" && e.details?.type !== "question.asked") return
+        if (
+          e.details?.type !== "permission.asked" &&
+          e.details?.type !== "question.asked" &&
+          e.details?.type !== "session.error"
+        )
+          return
         const title =
           e.details.type === "permission.asked"
             ? language.t("notification.permission.title")
-            : language.t("notification.question.title")
-        const icon = e.details.type === "permission.asked" ? ("checklist" as const) : ("bubble-5" as const)
+            : e.details.type === "question.asked"
+              ? language.t("notification.question.title")
+              : language.t("notification.session.error.title")
+        const icon =
+          e.details.type === "permission.asked"
+            ? ("checklist" as const)
+            : e.details.type === "question.asked"
+              ? ("bubble-5" as const)
+              : undefined
         const directory = e.name
         const props = e.details.properties
+        const err = e.details.type === "session.error" && "error" in props ? props.error : undefined
         if (e.details.type === "permission.asked" && permission.autoResponds(e.details.properties, directory)) return
 
         const [store] = globalSync.child(directory, { bootstrap: false })
@@ -474,7 +487,13 @@ export default function Layout(props: ParentProps) {
         const description =
           e.details.type === "permission.asked"
             ? language.t("notification.permission.description", { sessionTitle, projectName })
-            : language.t("notification.question.description", { sessionTitle, projectName })
+            : e.details.type === "question.asked"
+              ? language.t("notification.question.description", { sessionTitle, projectName })
+              : typeof err === "string"
+                ? err
+                : typeof err === "object" && err && "message" in err && typeof err.message === "string"
+                  ? err.message
+                  : language.t("notification.session.error.fallbackDescription")
         const href = `/${base64Encode(directory)}/session/${props.sessionID}`
 
         const now = Date.now()
@@ -497,9 +516,11 @@ export default function Layout(props: ParentProps) {
           }
         }
 
-        const currentSession = params.id
-        if (workspaceKey(directory) === workspaceKey(currentDir()) && props.sessionID === currentSession) return
-        if (workspaceKey(directory) === workspaceKey(currentDir()) && session?.parentID === currentSession) return
+        if (e.details.type !== "session.error") {
+          const currentSession = params.id
+          if (workspaceKey(directory) === workspaceKey(currentDir()) && props.sessionID === currentSession) return
+          if (workspaceKey(directory) === workspaceKey(currentDir()) && session?.parentID === currentSession) return
+        }
 
         dismissSessionAlert(sessionKey)
 

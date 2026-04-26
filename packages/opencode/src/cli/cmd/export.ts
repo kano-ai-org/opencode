@@ -277,7 +277,7 @@ export const ExportCommand = cmd({
           throw new UI.CancelledError()
         }
 
-        sessionID = selectedSession
+        sessionID = SessionID.make(selectedSession)
 
         prompts.outro("Exporting session...", {
           output: process.stderr,
