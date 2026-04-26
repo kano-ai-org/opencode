@@ -1,4 +1,5 @@
 import z from "zod"
+import { Effect, Layer, ServiceMap } from "effect"
 import { Filesystem } from "../util/filesystem"
 import path from "path"
 import { Database, eq, and, NotFoundError } from "../storage/db"
@@ -34,17 +35,16 @@ export namespace Project {
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
     ])
-    if (code !== 0) {
-      throw new Error(stderr.trim() || `git ${args.join(" ")} failed`)
-    }
     return {
+      exitCode: code,
+      stderr,
       text: async () => stdout,
     }
   }
 
   export const Info = z
     .object({
-      id: z.string(),
+      id: ProjectID.zod,
       worktree: z.string(),
       vcs: z.literal("git").optional(),
       name: z.string().optional(),
@@ -365,7 +365,7 @@ export namespace Project {
     const existing = await iife(async () => {
       if (row) return fromRow(row)
       const fresh: Info = {
-        id: data.id,
+        id: ProjectID.make(data.id),
         worktree: data.worktree,
         vcs: data.vcs as Info["vcs"],
         sandboxes: [],
@@ -526,12 +526,28 @@ export namespace Project {
       cwd: input.directory,
     })
     if (result.exitCode !== 0) {
-      const text = result.stderr.toString().trim() || result.text().trim()
+      const out = await result.text()
+      const text = result.stderr.trim() || out.trim()
       throw new Error(text || "Failed to initialize git repository")
     }
 
     return (await fromDirectory(input.directory)).project
   }
+
+  export interface Interface {
+    readonly fromDirectory: (directory: string) => Effect.Effect<Awaited<ReturnType<typeof fromDirectory>>>
+  }
+
+  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Project") {}
+
+  export const layer = Layer.succeed(
+    Service,
+    Service.of({
+      fromDirectory: (directory) => Effect.promise(() => fromDirectory(directory)),
+    }),
+  )
+
+  export const defaultLayer = layer
 
   export const update = fn(
     z.object({

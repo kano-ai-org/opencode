@@ -369,8 +369,8 @@ export namespace MessageV2 {
       .optional(),
     agent: z.string(),
     model: z.object({
-      providerID: ProviderID.zod,
-      modelID: ModelID.zod,
+      providerID: z.string(),
+      modelID: z.string(),
       variant: z.string().optional(),
     }),
     system: z.string().optional(),
@@ -418,8 +418,8 @@ export namespace MessageV2 {
       ])
       .optional(),
     parentID: MessageID.zod,
-    modelID: ModelID.zod,
-    providerID: ProviderID.zod,
+    modelID: z.string(),
+    providerID: z.string(),
     /**
      * @deprecated
      */

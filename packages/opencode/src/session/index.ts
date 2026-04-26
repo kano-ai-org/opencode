@@ -136,12 +136,12 @@ export namespace Session {
 
   export const Info = z
     .object({
-      id: Identifier.schema("session"),
+      id: SessionID.zod,
       slug: z.string(),
       projectID: z.string(),
       workspaceID: z.string().optional(),
       directory: z.string(),
-      parentID: Identifier.schema("session").optional(),
+      parentID: SessionID.zod.optional(),
       summary: z
         .object({
           additions: z.number(),
@@ -166,8 +166,8 @@ export namespace Session {
       permission: PermissionNext.Ruleset.optional(),
       revert: z
         .object({
-          messageID: z.string(),
-          partID: z.string().optional(),
+          messageID: MessageID.zod,
+          partID: PartID.zod.optional(),
           snapshot: z.string().optional(),
           diff: z.string().optional(),
         })
@@ -315,13 +315,13 @@ export namespace Session {
     permission?: PermissionNext.Ruleset
   }) {
     const result: Info = {
-      id: Identifier.descending("session", input.id),
+      id: SessionID.make(Identifier.descending("session", input.id)),
       slug: Slug.create(),
       version: Installation.VERSION,
       projectID: Instance.project.id,
       directory: input.directory,
       workspaceID: WorkspaceContext.workspaceID,
-      parentID: input.parentID,
+      parentID: input.parentID ? SessionID.make(input.parentID) : undefined,
       title: input.title ?? createDefaultTitle(!!input.parentID),
       permission: input.permission,
       time: {
@@ -931,7 +931,11 @@ export namespace Session {
   }
 
   export interface Interface {
+    readonly create: (input: Parameters<typeof create>[0]) => Effect.Effect<Info>
     readonly get: (id: string) => Effect.Effect<Info>
+    readonly list: () => Effect.Effect<Info[]>
+    readonly remove: (id: string) => Effect.Effect<void>
+    readonly children: (parentID: string) => Effect.Effect<Info[]>
     readonly messages: (input: { sessionID: string; limit?: number }) => Effect.Effect<MessageV2.WithParts[]>
     readonly updateMessage: (msg: MessageV2.Info) => Effect.Effect<MessageV2.Info>
     readonly updatePart: (part: MessageV2.Part) => Effect.Effect<MessageV2.Part>
@@ -956,7 +960,11 @@ export namespace Session {
   export const layer = Layer.succeed(
     Service,
     Service.of({
+      create: (input) => Effect.promise(() => create(input)),
       get: (id) => Effect.promise(() => get(id)),
+      list: () => Effect.sync(() => Array.from(list())),
+      remove: (id) => Effect.promise(() => remove(id)),
+      children: (parentID) => Effect.promise(() => children(parentID)),
       messages: (input) => Effect.promise(() => messages(input)),
       updateMessage: (msg) => Effect.promise(() => updateMessage(msg)),
       updatePart: (part) => Effect.promise(() => updatePart(part)),
@@ -978,8 +986,8 @@ export namespace Session {
     }),
     async (input) => {
       await SessionPrompt.command({
-        sessionID: input.sessionID,
-        messageID: input.messageID,
+        sessionID: SessionID.make(input.sessionID),
+        messageID: MessageID.make(input.messageID),
         model: input.providerID + "/" + input.modelID,
         command: Command.Default.INIT,
         arguments: "",

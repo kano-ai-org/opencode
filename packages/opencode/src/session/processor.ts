@@ -31,8 +31,10 @@ export namespace SessionProcessor {
 
   export interface Handle {
     readonly message: MessageV2.Assistant
-    readonly partFromToolCall: (toolCallID: string) => MessageV2.ToolPart | undefined
-    readonly abort: () => Effect.Effect<void>
+    readonly partFromToolCall?: (toolCallID: string) => MessageV2.ToolPart | undefined
+    readonly abort?: () => Effect.Effect<void>
+    readonly updateToolCall?: () => Effect.Effect<void>
+    readonly completeToolCall?: () => Effect.Effect<void>
     readonly process: (streamInput: LLM.StreamInput) => Effect.Effect<Result>
   }
 
@@ -530,10 +532,10 @@ export namespace SessionProcessor {
         return handle.message
       },
       partFromToolCall(toolCallID) {
-        return handle.partFromToolCall(toolCallID)
+        return handle.partFromToolCall?.(toolCallID)
       },
       abort() {
-        return getRuntime().runPromise(attach(handle.abort()))
+        return handle.abort ? getRuntime().runPromise(attach(handle.abort())) : Promise.resolve()
       },
       process(streamInput) {
         return getRuntime().runPromise(attach(handle.process(streamInput)))

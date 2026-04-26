@@ -131,6 +131,30 @@ describe("tool.bash", () => {
       },
     })
   })
+
+  each("merges explicit env into process env", async (item) => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const code = item.label === "cmd"
+          ? "echo %OPENCODE_TEST_ENV%"
+          : PS.has(sh())
+          ? '& { [Console]::WriteLine($env:OPENCODE_TEST_ENV) }'
+          : 'printf %s "$OPENCODE_TEST_ENV"'
+        const result = await bash.execute(
+          {
+            command: code,
+            env: { OPENCODE_TEST_ENV: "hello-env" },
+            description: "Print injected environment variable",
+          },
+          ctx,
+        )
+        expect(result.metadata.exit).toBe(0)
+        expect(result.metadata.output).toContain("hello-env")
+      },
+    })
+  })
 })
 
 describe("tool.bash permissions", () => {

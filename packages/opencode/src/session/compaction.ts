@@ -175,8 +175,9 @@ export namespace SessionCompaction {
         }
 
         const agent = yield* agents.get("compaction")
-        const model = agent.model
-          ? yield* Effect.promise(() => Provider.getModel(agent.model.providerID, agent.model.modelID))
+        const next = agent.model
+        const model = next
+          ? yield* Effect.promise(() => Provider.getModel(next.providerID, next.modelID))
           : yield* Effect.promise(() => Provider.getModel(userMessage.model.providerID, userMessage.model.modelID))
         // Allow plugins to inject context or replace compaction prompt.
         const compacting = yield* plugin.trigger(

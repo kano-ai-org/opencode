@@ -1,15 +1,18 @@
 import path from "path"
 import os from "os"
 import fs from "fs/promises"
+import { Effect, Layer, ServiceMap } from "effect"
 import z from "zod"
 import { Filesystem } from "../util/filesystem"
 import { Identifier } from "../id/id"
 import { MessageV2 } from "./message-v2"
+import { MessageID, SessionID } from "./schema"
 import { Log } from "../util/log"
 import { SessionRevert } from "./revert"
 import { Session } from "."
 import { Agent } from "../agent/agent"
 import { Provider } from "../provider/provider"
+import { ModelID, ProviderID } from "../provider/schema"
 import { type Tool as AITool, tool, jsonSchema, type ToolCallOptions, asSchema } from "ai"
 import { SessionCompaction } from "./compaction"
 import { Instance } from "../project/instance"
@@ -89,8 +92,8 @@ export namespace SessionPrompt {
   }
 
   export const PromptInput = z.object({
-    sessionID: Identifier.schema("session"),
-    messageID: Identifier.schema("message").optional(),
+    sessionID: SessionID.zod,
+    messageID: MessageID.zod.optional(),
     model: z
       .object({
         providerID: z.string(),
@@ -155,7 +158,7 @@ export namespace SessionPrompt {
   })
   export type PromptInput = z.infer<typeof PromptInput>
 
-  export const prompt = fn(PromptInput, async (input) => {
+  export let prompt: (input: PromptInput) => Promise<MessageV2.WithParts> = fn(PromptInput, async (input) => {
     const session = await Session.get(input.sessionID)
     await SessionRevert.cleanup(session)
 
@@ -278,17 +281,16 @@ export namespace SessionPrompt {
     match.abort.abort()
     delete s[sessionID]
     SessionStatus.set(sessionID as any, { type: "idle" })
-    return
   }
 
   export const LoopInput = z.object({
-    sessionID: Identifier.schema("session"),
+    sessionID: SessionID.zod,
     resume_existing: z.boolean().optional(),
   })
   export const loop = fn(LoopInput, async (input) => {
     const { sessionID, resume_existing } = input
 
-    const abort = resume_existing ? resume(sessionID) : start(sessionID)
+    const abort = resume_existing ? resume(sessionID) ?? start(sessionID) : start(sessionID)
     if (!abort) {
       return new Promise<MessageV2.WithParts>((resolve, reject) => {
         const callbacks = state()[sessionID].callbacks
@@ -375,7 +377,7 @@ export namespace SessionPrompt {
            sessionID: sessionID as any,
            mode: task.agent,
            agent: task.agent,
-           variant: lastUser.variant,
+           variant: lastUser.model.variant,
            path: {
              cwd: Instance.directory,
              root: Instance.worktree,
@@ -563,7 +565,10 @@ export namespace SessionPrompt {
          await SessionCompaction.create({
            sessionID: sessionID as any,
            agent: lastUser.agent,
-           model: currentUserModel,
+           model: {
+             providerID: ProviderID.make(String(currentUserModel.providerID)),
+             modelID: ModelID.make(String(currentUserModel.modelID)),
+           },
            auto: true,
          })
         continue
@@ -586,7 +591,7 @@ export namespace SessionPrompt {
            role: "assistant",
            mode: agent.name,
            agent: agent.name,
-           variant: lastUser.variant,
+           variant: lastUser.model.variant,
            path: {
              cwd: Instance.directory,
              root: Instance.worktree,
@@ -719,7 +724,10 @@ export namespace SessionPrompt {
        await SessionCompaction.create({
            sessionID: sessionID as any,
            agent: lastUser.agent,
-           model: currentUserModel,
+           model: {
+             providerID: ProviderID.make(String(currentUserModel.providerID)),
+             modelID: ModelID.make(String(currentUserModel.modelID)),
+           },
            auto: true,
            overflow: !processor.message.finish,
          })
@@ -767,7 +775,7 @@ export namespace SessionPrompt {
        agent: input.agent.name,
        messages: input.messages,
        metadata: async (val: { title?: string; metadata?: any }) => {
-         const match = input.processor.partFromToolCall(options.toolCallId)
+         const match = input.processor.partFromToolCall?.(options.toolCallId)
          if (match && match.state.status === "running") {
            await Session.updatePart({
              ...match,
@@ -1002,10 +1010,10 @@ export namespace SessionPrompt {
        model: {
          providerID: model.providerID as any,
          modelID: model.modelID as any,
+         variant,
        },
        system: input.system,
        format: input.format,
-       variant,
      }
      using _ = defer(() => InstructionPrompt.clear(info.id))
 
@@ -1516,7 +1524,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         cancel(input.sessionID)
       } else {
         // Otherwise, trigger the session loop to process queued items
-        loop({ sessionID: input.sessionID, resume_existing: true }).catch((error) => {
+        loop({ sessionID: SessionID.make(input.sessionID), resume_existing: true }).catch((error) => {
           log.error("session loop failed to resume after shell command", { sessionID: input.sessionID, error })
         })
       }
@@ -1742,8 +1750,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
   }
 
   export const CommandInput = z.object({
-    messageID: Identifier.schema("message").optional(),
-    sessionID: Identifier.schema("session"),
+    messageID: MessageID.zod.optional(),
+    sessionID: SessionID.zod,
     agent: z.string().optional(),
     model: z.string().optional(),
     arguments: z.string(),
@@ -1918,6 +1926,31 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
     return result
   }
+
+  export interface Interface {
+    readonly create: (input: PromptInput) => Effect.Effect<MessageV2.WithParts>
+    readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts>
+    readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts>
+    readonly loop: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts>
+    readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts>
+    readonly cancel: (sessionID: string) => Effect.Effect<void>
+  }
+
+  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/SessionPrompt") {}
+
+  export const layer = Layer.succeed(
+    Service,
+    Service.of({
+      create: (input) => Effect.promise(() => prompt(input)),
+      prompt: (input) => Effect.promise(() => prompt(input)),
+      command: (input) => Effect.promise(() => command(input)),
+      loop: (input) => Effect.promise(() => loop(input)),
+      shell: (input) => Effect.promise(() => shell(input)),
+      cancel: (sessionID) => Effect.sync(() => cancel(sessionID)),
+    }),
+  )
+
+  export const defaultLayer = layer
 
   async function ensureTitle(input: {
     session: Session.Info

@@ -62,3 +62,31 @@ test("task tool child-session link does not trigger stale show errors", async ({
     page.off("pageerror", onError)
   }
 })
+
+test("subagent status row opens the child session", async ({ page, llm, project }) => {
+  test.setTimeout(120_000)
+
+  await project.open()
+  await withSession(project.sdk, `e2e subagent row ${Date.now()}`, async (session) => {
+    const taskInput = {
+      description: "Open child session",
+      prompt: "Search the repository for AssistantParts and then reply with exactly CHILD_OK.",
+      subagent_type: "general",
+    }
+    await llm.toolMatch(inputMatch(taskInput), "task", taskInput)
+    const child = await seedSessionTask(project.sdk, {
+      sessionID: session.id,
+      description: taskInput.description,
+      prompt: taskInput.prompt,
+    })
+    project.trackSession(child.sessionID)
+
+    await project.gotoSession(session.id)
+
+    const row = page.locator('[data-component="subagent-status-item"][data-session-id]').first()
+    await expect(row).toBeVisible({ timeout: 30_000 })
+    await row.click()
+
+    await expect(page).toHaveURL(new RegExp(`/session/${child.sessionID}(?:[/?#]|$)`), { timeout: 30_000 })
+  })
+})

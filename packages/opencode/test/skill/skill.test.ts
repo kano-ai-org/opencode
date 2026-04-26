@@ -390,3 +390,75 @@ description: A skill in the .opencode/skills directory.
     },
   })
 })
+
+test("discovers skills from deeply nested skill folders under config directories", async () => {
+  await using tmp = await tmpdir({
+    git: true,
+    init: async (dir) => {
+      // nested under .opencode/some-vendor/skills/foo/SKILL.md
+      const nestedDir = path.join(dir, ".opencode", "some-vendor", "skills", "nested-skill")
+      await Bun.write(
+        path.join(nestedDir, "SKILL.md"),
+        `---
+name: nested-skill
+description: A skill in a deeply nested skill folder.
+---
+
+# Nested Skill
+`,
+      )
+    },
+  })
+
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const skills = await Skill.all()
+      const nested = skills.find((s) => s.name === "nested-skill")
+      expect(nested).toBeDefined()
+      expect(nested!.description).toBe("A skill in a deeply nested skill folder.")
+      expect(nested!.location).toContain(path.join(".opencode", "some-vendor", "skills", "nested-skill", "SKILL.md"))
+    },
+  })
+})
+
+test("discovers skills from any folder named skill/skills under config directories", async () => {
+  await using tmp = await tmpdir({
+    git: true,
+    init: async (dir) => {
+      // .opencode/tools/skill/bar/SKILL.md
+      const skillDir = path.join(dir, ".opencode", "tools", "skill", "bar-skill")
+      await Bun.write(
+        path.join(skillDir, "SKILL.md"),
+        `---
+name: bar-skill
+description: Skill under a singular 'skill' folder.
+---
+
+# Bar Skill
+`,
+      )
+      // also .opencode/vendor/skills/baz/SKILL.md
+      const skillsDir = path.join(dir, ".opencode", "vendor", "skills", "baz-skill")
+      await Bun.write(
+        path.join(skillsDir, "SKILL.md"),
+        `---
+name: baz-skill
+description: Skill under a plural 'skills' folder.
+---
+
+# Baz Skill
+`,
+      )
+    },
+  })
+
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const skills = await Skill.all()
+      expect(skills.find((s) => s.name === "bar-skill")).toBeDefined()
+      expect(skills.find((s) => s.name === "baz-skill")).toBeDefined()
+    },
+  })
+})

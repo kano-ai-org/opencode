@@ -433,6 +433,37 @@ it.live("static loop consumes queued replies across turns", () =>
   ),
 )
 
+it.live("resume_existing starts loop when no in-memory state exists", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const session = yield* Effect.promise(() =>
+        Session.create({
+          title: "Prompt provider resume",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        }),
+      )
+
+      yield* Effect.promise(() =>
+        SessionPrompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          noReply: true,
+          parts: [{ type: "text", text: "hello resume" }],
+        }),
+      )
+
+      yield* llm.text("world resume")
+
+      const result = yield* Effect.promise(() =>
+        SessionPrompt.loop({ sessionID: session.id, resume_existing: true }),
+      )
+      expect(result.info.role).toBe("assistant")
+      expect(result.parts.some((part) => part.type === "text" && part.text === "world resume")).toBe(true)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
 it.live("loop continues when finish is tool-calls", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* ({ llm }) {

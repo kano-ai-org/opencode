@@ -22,7 +22,7 @@ export namespace Skill {
   const log = Log.create({ service: "skill" })
   const EXTERNAL_DIRS = [".claude", ".agents"]
   const EXTERNAL_SKILL_PATTERN = "skills/**/SKILL.md"
-  const OPENCODE_SKILL_PATTERN = "{skill,skills}/**/SKILL.md"
+  const CONFIG_SKILL_PATTERN = "**/SKILL.md"
   const SKILL_PATTERN = "**/SKILL.md"
 
   export const Info = z.object({
@@ -161,7 +161,7 @@ export namespace Skill {
 
     const configDirs = yield* config.directories()
     for (const dir of configDirs) {
-      yield* scan(state, bus, dir, OPENCODE_SKILL_PATTERN)
+      yield* scan(state, bus, dir, CONFIG_SKILL_PATTERN)
     }
 
     const cfg = yield* config.get()

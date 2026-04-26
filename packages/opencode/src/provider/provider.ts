@@ -1,5 +1,6 @@
 import z from "zod"
 import os from "os"
+import { Effect, Layer, ServiceMap } from "effect"
 import fuzzysort from "fuzzysort"
 import { Config } from "../config/config"
 import { mapValues, mergeDeep, omit, pickBy, sortBy } from "remeda"
@@ -17,6 +18,7 @@ import { iife } from "@/util/iife"
 import { Global } from "../global"
 import path from "path"
 import { Filesystem } from "../util/filesystem"
+import { ModelID, ProviderID } from "./schema"
 
 // Direct imports for bundled providers
 import { createAmazonBedrock, type AmazonBedrockProviderSettings } from "@ai-sdk/amazon-bedrock"
@@ -733,8 +735,8 @@ export namespace Provider {
         npm: resolveProviderNpm(provider, model),
       },
       status: model.status ?? "active",
-      headers: model.headers ?? {},
-      options: model.options ?? {},
+      headers: (model as any).headers ?? {},
+      options: (model as any).options ?? {},
       cost: {
         input: model.cost?.input ?? 0,
         output: model.cost?.output ?? 0,
@@ -979,7 +981,7 @@ export namespace Provider {
 
       // Load for the main provider if auth exists
       if (auth) {
-        const options = await plugin.auth.loader(() => Auth.get(providerID) as any, database[plugin.auth.provider])
+        const options = await plugin.auth.loader(() => Auth.get(providerID) as any, database[plugin.auth.provider] as any)
         const opts = options ?? {}
         const patch: Partial<Info> = providers[providerID] ? { options: opts } : { source: "custom", options: opts }
         mergeProvider(providerID, patch)
@@ -993,7 +995,7 @@ export namespace Provider {
           if (enterpriseAuth) {
             const enterpriseOptions = await plugin.auth.loader(
               () => Auth.get(enterpriseProviderID) as any,
-              database[enterpriseProviderID],
+              database[enterpriseProviderID] as any,
             )
             const opts = enterpriseOptions ?? {}
             const patch: Partial<Info> = providers[enterpriseProviderID]
@@ -1354,10 +1356,41 @@ export namespace Provider {
   export function parseModel(model: string) {
     const [providerID, ...rest] = model.split("/")
     return {
-      providerID: providerID,
-      modelID: rest.join("/"),
+      providerID: ProviderID.make(providerID),
+      modelID: ModelID.make(rest.join("/")),
     }
   }
+
+  export interface Interface {
+    readonly list: () => Effect.Effect<Record<string, Info>>
+    readonly providers: () => Effect.Effect<Record<string, Info>>
+    readonly getProvider: (providerID: string) => Effect.Effect<Info>
+    readonly getModel: (providerID: string, modelID: string) => Effect.Effect<Model>
+    readonly closest: (providerID: string) => Effect.Effect<{ providerID: string; modelID: string } | undefined>
+    readonly getSmallModel: (providerID: string) => Effect.Effect<Model | undefined>
+    readonly getLanguage: (input: { model: Model }) => Effect.Effect<never>
+    readonly defaultModel: () => Effect.Effect<{ providerID: string; modelID: string }>
+  }
+
+  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Provider") {}
+
+  export const layer = Layer.succeed(
+    Service,
+    Service.of({
+      list: () => Effect.promise(() => list()),
+      providers: () => Effect.promise(() => list()),
+      getProvider: (providerID) =>
+        Effect.promise(() => list().then((items) => items[providerID] ?? Promise.reject(new Error(`Unknown provider: ${providerID}`)))),
+      getModel: (providerID, modelID) => Effect.promise(() => getModel(providerID, modelID)),
+      closest: (providerID) =>
+        Effect.promise(() => getSmallModel(providerID).then((item) => (item ? { providerID: item.providerID, modelID: item.id } : undefined))),
+      getSmallModel: (providerID) => Effect.promise(() => getSmallModel(providerID)),
+      getLanguage: () => Effect.die(new Error("Provider.Service.getLanguage is not implemented in the runtime facade")),
+      defaultModel: () => Effect.promise(() => defaultModel()),
+    }),
+  )
+
+  export const defaultLayer = layer
 
   export const ModelNotFoundError = NamedError.create(
     "ProviderModelNotFoundError",

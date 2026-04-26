@@ -42,7 +42,7 @@ describe("session action routes", () => {
       directory: tmp.path,
       fn: async () => {
         const session = await Session.create({})
-        const cancel = spyOn(SessionPrompt, "cancel").mockResolvedValue()
+        const cancel = spyOn(SessionPrompt, "cancel").mockReturnValue(undefined)
         const app = Server.Default().app
 
         const res = await app.request(`/session/${session.id}/abort`, {
