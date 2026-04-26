@@ -32,6 +32,8 @@ import { useSync } from "@/context/sync"
 import { messageAgentColor } from "@/utils/agent"
 import { sessionTitle } from "@/utils/session-title"
 import { parseCommentNote, readCommentMetadata } from "@/utils/comment-note"
+import { SubagentStatusPanel } from "@/pages/session/subagent-status-panel"
+import { groupSubagentStatusByParentMessage } from "@/pages/session/subagent-status"
 import { makeTimer } from "@solid-primitives/timer"
 
 type MessageComment = {
@@ -333,6 +335,17 @@ export function MessageTimeline(props: {
     return language.t("command.session.new")
   })
   const showHeader = createMemo(() => !!(titleValue() || parentID()))
+  const subagentStatusByParentMessage = createMemo(() => {
+    const id = sessionID()
+    if (!id) return {}
+    return groupSubagentStatusByParentMessage({
+      sessionID: id,
+      sessions: sync.data.session ?? [],
+      sessionStatus: sync.data.session_status,
+      messages: sessionMessages(),
+      parts: sync.data.part,
+    })
+  })
   const stageCfg = { init: 1, batch: 3 }
   const staging = createTimelineStaging({
     sessionKey,
@@ -1104,7 +1117,12 @@ export function MessageTimeline(props: {
                           content: "flex flex-col justify-between !overflow-visible",
                           container: "w-full px-4 md:px-5",
                         }}
-                      />
+                      >
+                        <SubagentStatusPanel
+                          routeDirectory={params.dir ?? ""}
+                          items={subagentStatusByParentMessage()[messageID] ?? []}
+                        />
+                      </SessionTurn>
                     </div>
                   )
                 }}
