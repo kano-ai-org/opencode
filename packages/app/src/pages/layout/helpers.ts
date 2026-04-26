@@ -7,6 +7,21 @@ type SessionStore = {
   path: { directory: string }
 }
 
+export const workspaceKey = (directory: string) => {
+  const value = directory.replaceAll("\\", "/")
+  const drive = value.match(/^([A-Za-z]:)\/+$/)
+  if (drive) return `${drive[1]}/`
+  if (/^\/+$/i.test(value)) return "/"
+  return value.replace(/\/+$/, "")
+}
+
+export const workspaceMatch = (left: string, right: string) => {
+  const leftKey = workspaceKey(left)
+  const rightKey = workspaceKey(right)
+  if (leftKey === rightKey) return true
+  const leftTail = leftKey.split("/").filter(Boolean).slice(-2).join("/")
+  return leftTail.length > 0 && leftTail === rightKey.split("/").filter(Boolean).slice(-2).join("/")
+}
 function sortSessions(now: number) {
   const oneMinuteAgo = now - 60 * 1000
   return (a: Session, b: Session) => {

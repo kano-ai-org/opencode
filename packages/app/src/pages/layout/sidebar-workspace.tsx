@@ -34,7 +34,7 @@ type InlineEditorComponent = (props: {
 
 export type WorkspaceSidebarContext = {
   currentDir: Accessor<string>
-  navList: Accessor<Session[]>
+  navList?: Accessor<Session[]>
   sidebarExpanded: Accessor<boolean>
   sidebarHovering: Accessor<boolean>
   clearHoverProjectSoon: () => void

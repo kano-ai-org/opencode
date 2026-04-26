@@ -6,10 +6,17 @@ import { InstanceStore } from "@/project/instance-store"
 import { Project } from "@/project/project"
 import z from "zod"
 import { ProjectID } from "@/project/schema"
+import { ProjectTable } from "@/project/project.sql"
+import { Database, eq } from "@/storage"
 import { errors } from "../../error"
 import { lazy } from "@/util/lazy"
 import { getBootstrapRunEffect } from "@/effect/app-runtime"
 import { jsonRequest, runRequest } from "./trace"
+
+const WorkspaceToggles = z.object({
+  version: z.number().int().nonnegative(),
+  toggles: z.record(z.string(), z.boolean()),
+})
 
 export const ProjectRoutes = lazy(() =>
   new Hono()
@@ -54,6 +61,105 @@ export const ProjectRoutes = lazy(() =>
       }),
       async (c) => {
         return c.json(Instance.project)
+      },
+    )
+    .get(
+      "/:projectID/workspace-toggles",
+      describeRoute({
+        summary: "Get project workspace toggles",
+        description: "Return persisted sidebar workspace visibility toggles for a project.",
+        operationId: "project.workspaceToggles.get",
+        responses: {
+          200: {
+            description: "Workspace toggle state",
+            content: {
+              "application/json": {
+                schema: resolver(WorkspaceToggles),
+              },
+            },
+          },
+          ...errors(404),
+        },
+      }),
+      validator("param", z.object({ projectID: ProjectID.zod })),
+      async (c) => {
+        const projectID = c.req.valid("param").projectID
+        const row = Database.use((db) =>
+          db
+            .select({
+              toggles: ProjectTable.workspace_toggles,
+              version: ProjectTable.workspace_toggles_version,
+            })
+            .from(ProjectTable)
+            .where(eq(ProjectTable.id, projectID))
+            .get(),
+        )
+        if (!row) return c.json({ message: `Project not found: ${projectID}` }, 404)
+        return c.json({ toggles: row.toggles ?? {}, version: row.version ?? 0 })
+      },
+    )
+    .patch(
+      "/:projectID/workspace-toggles",
+      describeRoute({
+        summary: "Update project workspace toggles",
+        description: "Persist sidebar workspace visibility toggles using optimistic concurrency.",
+        operationId: "project.workspaceToggles.update",
+        responses: {
+          200: {
+            description: "Updated workspace toggle state",
+            content: {
+              "application/json": {
+                schema: resolver(WorkspaceToggles),
+              },
+            },
+          },
+          409: {
+            description: "Workspace toggle version conflict; response contains current state.",
+            content: {
+              "application/json": {
+                schema: resolver(WorkspaceToggles),
+              },
+            },
+          },
+          ...errors(404),
+        },
+      }),
+      validator("param", z.object({ projectID: ProjectID.zod })),
+      validator("json", WorkspaceToggles),
+      async (c) => {
+        const projectID = c.req.valid("param").projectID
+        const body = c.req.valid("json")
+        const current = Database.use((db) =>
+          db
+            .select({
+              toggles: ProjectTable.workspace_toggles,
+              version: ProjectTable.workspace_toggles_version,
+            })
+            .from(ProjectTable)
+            .where(eq(ProjectTable.id, projectID))
+            .get(),
+        )
+        if (!current) return c.json({ message: `Project not found: ${projectID}` }, 404)
+        if ((current.version ?? 0) !== body.version) {
+          return c.json({ toggles: current.toggles ?? {}, version: current.version ?? 0 }, 409)
+        }
+        const nextVersion = body.version + 1
+        const updated = Database.use((db) =>
+          db
+            .update(ProjectTable)
+            .set({
+              workspace_toggles: body.toggles,
+              workspace_toggles_version: nextVersion,
+              time_updated: Date.now(),
+            })
+            .where(eq(ProjectTable.id, projectID))
+            .returning({
+              toggles: ProjectTable.workspace_toggles,
+              version: ProjectTable.workspace_toggles_version,
+            })
+            .get(),
+        )
+        return c.json({ toggles: updated?.toggles ?? body.toggles, version: updated?.version ?? nextVersion })
       },
     )
     .post(
