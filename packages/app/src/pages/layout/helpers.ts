@@ -14,6 +14,14 @@ export const workspaceKey = (directory: string) => {
   return value.replace(/\/+$/, "")
 }
 
+export const workspaceMatch = (left: string, right: string) => {
+  const leftKey = workspaceKey(left)
+  const rightKey = workspaceKey(right)
+  if (leftKey === rightKey) return true
+  const leftTail = leftKey.split("/").filter(Boolean).slice(-2).join("/")
+  return leftTail.length > 0 && leftTail === rightKey.split("/").filter(Boolean).slice(-2).join("/")
+}
+
 function sortSessions(now: number) {
   const oneMinuteAgo = now - 60 * 1000
   return (a: Session, b: Session) => {

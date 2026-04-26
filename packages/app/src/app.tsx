@@ -286,7 +286,6 @@ export function AppInterface(props: {
   return (
     <ServerProvider
       defaultServer={props.defaultServer}
-      disableHealthCheck={props.disableHealthCheck}
       servers={props.servers}
     >
       <ConnectionGate disableHealthCheck={props.disableHealthCheck}>
