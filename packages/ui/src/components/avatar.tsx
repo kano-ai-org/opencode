@@ -1,4 +1,4 @@
-import { type ComponentProps, splitProps, Show } from "solid-js"
+import { type ComponentProps, splitProps, Show, createEffect, createMemo, createSignal } from "solid-js"
 
 const segmenter =
   typeof Intl !== "undefined" && "Segmenter" in Intl
@@ -14,6 +14,7 @@ function first(value: string) {
 export interface AvatarProps extends ComponentProps<"div"> {
   fallback: string
   src?: string
+  fallbackSrc?: string
   background?: string
   foreground?: string
   size?: "small" | "normal" | "large"
@@ -23,6 +24,7 @@ export function Avatar(props: AvatarProps) {
   const [split, rest] = splitProps(props, [
     "fallback",
     "src",
+    "fallbackSrc",
     "background",
     "foreground",
     "size",
@@ -30,13 +32,30 @@ export function Avatar(props: AvatarProps) {
     "classList",
     "style",
   ])
-  const src = split.src // did this so i can zero it out to test fallback
+  const [stage, setStage] = createSignal<0 | 1 | 2>(0)
+  createEffect(() => {
+    split.src
+    split.fallbackSrc
+    setStage(0)
+  })
+  const src = createMemo(() => {
+    const current = stage()
+    if (current === 0) return split.src
+    if (current === 1) return split.fallbackSrc
+    return undefined
+  })
+  const onError = () => {
+    setStage((current) => {
+      if (current === 0 && split.fallbackSrc) return 1
+      return 2
+    })
+  }
   return (
     <div
       {...rest}
       data-component="avatar"
       data-size={split.size || "normal"}
-      data-has-image={src ? "" : undefined}
+      data-has-image={src() ? "" : undefined}
       classList={{
         ...split.classList,
         [split.class ?? ""]: !!split.class,
@@ -47,8 +66,8 @@ export function Avatar(props: AvatarProps) {
         ...(!src && split.foreground ? { "--avatar-fg": split.foreground } : {}),
       }}
     >
-      <Show when={src} fallback={first(split.fallback)}>
-        {(src) => <img src={src()} draggable={false} data-slot="avatar-image" />}
+      <Show when={src()} fallback={first(split.fallback)}>
+        {(value) => <img src={value()} draggable={false} data-slot="avatar-image" onError={onError} />}
       </Show>
     </div>
   )

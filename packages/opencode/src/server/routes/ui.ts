@@ -12,9 +12,20 @@ const embeddedUIPromise = Flag.OPENCODE_DISABLE_EMBEDDED_WEB_UI
 
 const DEFAULT_CSP =
   "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:"
+const DEFAULT_WEB_UI_ORIGIN = new URL("https://app.opencode.ai")
 
 const csp = (hash = "") =>
   `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:`
+
+const resolveWebUIOrigin = () => {
+  const value = process.env.OPENCODE_WEB_UI_ORIGIN?.trim()
+  if (!value) return DEFAULT_WEB_UI_ORIGIN
+  try {
+    return new URL(value)
+  } catch {
+    return DEFAULT_WEB_UI_ORIGIN
+  }
+}
 
 export const UIRoutes = (): Hono =>
   new Hono().all("/*", async (c) => {
@@ -36,13 +47,30 @@ export const UIRoutes = (): Hono =>
         return c.json({ error: "Not Found" }, 404)
       }
     } else {
-      const response = await proxy(`https://app.opencode.ai${path}`, {
-        raw: c.req.raw,
-        headers: {
-          ...Object.fromEntries(c.req.raw.headers.entries()),
-          host: "app.opencode.ai",
-        },
-      })
+      const uiOrigin = resolveWebUIOrigin()
+      const search = new URL(c.req.raw.url).search
+      const proxyUI = (origin: URL) =>
+        proxy(new URL(`${path}${search}`, origin).toString(), {
+          raw: c.req.raw,
+          headers: {
+            ...Object.fromEntries(c.req.raw.headers.entries()),
+            host: origin.host,
+          },
+        })
+      const origins = uiOrigin.href === DEFAULT_WEB_UI_ORIGIN.href ? [DEFAULT_WEB_UI_ORIGIN] : [uiOrigin, DEFAULT_WEB_UI_ORIGIN]
+      const response =
+        (await proxyUI(origins[0]).catch(() => undefined))
+        ?? (origins[1] ? await proxyUI(origins[1]).catch(() => undefined) : undefined)
+
+      if (!response) {
+        return c.json(
+          {
+            error: "Unable to load web UI",
+            tried: origins.map((origin) => origin.toString()),
+          },
+          502,
+        )
+      }
       const match = response.headers.get("content-type")?.includes("text/html")
         ? (await response.clone().text()).match(
             /<script\b(?![^>]*\bsrc\s*=)[^>]*\bid=(['"])oc-theme-preload-script\1[^>]*>([\s\S]*?)<\/script>/i,

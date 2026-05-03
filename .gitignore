@@ -32,3 +32,6 @@ tsconfig.tsbuildinfo
 .kano/cache/git/discover-repos/discover-repos.json
 .kano/cache/git/workspace-manifest.json
 /packages/opencode/src/provider/models-snapshot.ts
+packages/opencode/.playwright-mcp/console-2026-05-02T05-44-48-246Z.log
+packages/opencode/.playwright-mcp/console-2026-05-03T03-02-58-723Z.log
+packages/opencode/.playwright-mcp/console-2026-05-03T04-14-29-746Z.log
