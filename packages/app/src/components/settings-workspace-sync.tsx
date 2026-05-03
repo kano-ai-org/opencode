@@ -49,6 +49,7 @@ const WorkspaceIcon = (props: { icon?: { url?: string; override?: string; color?
     <Avatar
       fallback={props.title}
       src={props.icon?.override ?? props.icon?.url}
+      fallbackSrc={props.icon?.override && props.icon?.url ? props.icon.url : undefined}
       style={{ background: props.icon?.color }}
       class="size-full rounded-[6px]"
     />

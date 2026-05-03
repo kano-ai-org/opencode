@@ -16,7 +16,7 @@ const embeddedUIPromise = Flag.OPENCODE_DISABLE_EMBEDDED_WEB_UI
 
 const DEFAULT_CSP =
   "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:"
-const UI_UPSTREAM = new URL("https://app.opencode.ai")
+const DEFAULT_WEB_UI_ORIGIN = new URL("https://app.opencode.ai")
 
 const csp = (hash = "") =>
   `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:`
@@ -40,8 +40,20 @@ function proxyResponseHeaders(headers: Record<string, string>) {
   return result
 }
 
-function upstreamURL(path: string) {
-  return new URL(path, UI_UPSTREAM).toString()
+const resolveWebUIOrigin = () => {
+  const value = process.env.OPENCODE_WEB_UI_ORIGIN?.trim()
+  if (!value) return DEFAULT_WEB_UI_ORIGIN
+  try {
+    return new URL(value)
+  } catch {
+    return DEFAULT_WEB_UI_ORIGIN
+  }
+}
+
+const webUIOrigins = () => {
+  const origin = resolveWebUIOrigin()
+  if (origin.href === DEFAULT_WEB_UI_ORIGIN.href) return [DEFAULT_WEB_UI_ORIGIN]
+  return [origin, DEFAULT_WEB_UI_ORIGIN]
 }
 
 function embeddedUI() {
@@ -51,7 +63,9 @@ function embeddedUI() {
 
 export async function serveUI(request: Request) {
   const embeddedWebUI = await embeddedUI()
-  const path = new URL(request.url).pathname
+  const parsed = new URL(request.url)
+  const path = parsed.pathname
+  const pathWithSearch = `${path}${parsed.search}`
 
   if (embeddedWebUI) {
     const match = embeddedWebUI[path.replace(/^\//, "")] ?? embeddedWebUI["index.html"] ?? null
@@ -67,10 +81,26 @@ export async function serveUI(request: Request) {
     return Response.json({ error: "Not Found" }, { status: 404 })
   }
 
-  const response = await proxy(upstreamURL(path), {
-    raw: request,
-    headers: ProxyUtil.headers(request, { host: UI_UPSTREAM.host }),
-  })
+  const origins = webUIOrigins()
+  let response: Response | undefined
+  for (const origin of origins) {
+    response = await proxy(new URL(pathWithSearch, origin).toString(), {
+      raw: request,
+      headers: ProxyUtil.headers(request, { host: origin.host }),
+    }).catch(() => undefined)
+    if (response) break
+  }
+
+  if (!response) {
+    return Response.json(
+      {
+        error: "Unable to load web UI",
+        tried: origins.map((origin) => origin.toString()),
+      },
+      { status: 502 },
+    )
+  }
+
   const match = response.headers.get("content-type")?.includes("text/html")
     ? themePreloadHash(await response.clone().text())
     : undefined
@@ -85,7 +115,9 @@ export function serveUIEffect(
 ) {
   return Effect.gen(function* () {
     const embeddedWebUI = yield* Effect.promise(() => embeddedUI())
-    const path = new URL(request.url, "http://localhost").pathname
+    const parsed = new URL(request.url, "http://localhost")
+    const path = parsed.pathname
+    const pathWithSearch = `${path}${parsed.search}`
 
     if (embeddedWebUI) {
       const match = embeddedWebUI[path.replace(/^\//, "")] ?? embeddedWebUI["index.html"] ?? null
@@ -101,24 +133,52 @@ export function serveUIEffect(
       return HttpServerResponse.jsonUnsafe({ error: "Not Found" }, { status: 404 })
     }
 
-    const response = yield* services.client.execute(
-      HttpClientRequest.make(request.method)(upstreamURL(path), {
-        headers: ProxyUtil.headers(request.headers, { host: UI_UPSTREAM.host }),
-        body: requestBody(request),
-      }),
-    )
-    const headers = proxyResponseHeaders(response.headers)
+    const origins = webUIOrigins()
+    let response: {
+      value: HttpClient.HttpClient.Response
+      origin: URL
+    } | undefined
+    for (const origin of origins) {
+      const attempted = yield* Effect.either(
+        services.client.execute(
+          HttpClientRequest.make(request.method)(new URL(pathWithSearch, origin).toString(), {
+            headers: ProxyUtil.headers(request.headers, { host: origin.host }),
+            body: requestBody(request),
+          }),
+        ),
+      )
+      if (attempted._tag === "Right") {
+        response = {
+          value: attempted.right,
+          origin,
+        }
+        break
+      }
+    }
 
-    if (response.headers["content-type"]?.includes("text/html")) {
-      const body = yield* response.text
+    if (!response) {
+      return HttpServerResponse.jsonUnsafe(
+        {
+          error: "Unable to load web UI",
+          tried: origins.map((origin) => origin.toString()),
+        },
+        { status: 502 },
+      )
+    }
+
+    const upstreamResponse = response.value
+    const headers = proxyResponseHeaders(upstreamResponse.headers)
+
+    if (upstreamResponse.headers["content-type"]?.includes("text/html")) {
+      const body = yield* upstreamResponse.text
       const match = themePreloadHash(body)
       headers.set("Content-Security-Policy", csp(match ? createHash("sha256").update(match[2]).digest("base64") : ""))
-      return HttpServerResponse.text(body, { status: response.status, headers })
+      return HttpServerResponse.text(body, { status: upstreamResponse.status, headers })
     }
 
     headers.set("Content-Security-Policy", csp())
-    return HttpServerResponse.stream(response.stream.pipe(Stream.catchCause(() => Stream.empty)), {
-      status: response.status,
+    return HttpServerResponse.stream(upstreamResponse.stream.pipe(Stream.catchCause(() => Stream.empty)), {
+      status: upstreamResponse.status,
       headers,
     })
   })
