@@ -1,0 +1,287 @@
+import { Hono } from "hono"
+import { describeRoute, validator } from "hono-openapi"
+import { resolver } from "hono-openapi"
+import { Instance } from "../../project/instance"
+import { Project } from "../../project/project"
+import z from "zod"
+import { ProjectID } from "../../project/schema"
+import { errors } from "../error"
+import { lazy } from "../../util/lazy"
+import { InstanceBootstrap } from "../../project/bootstrap"
+
+import { existsSync } from "node:fs"
+
+export const ProjectRoutes = lazy(() =>
+  new Hono()
+    .get(
+      "/",
+      describeRoute({
+        summary: "List all projects",
+        description: "Get a list of projects that have been opened with OpenCode.",
+        operationId: "project.list",
+        responses: {
+          200: {
+            description: "List of projects",
+            content: {
+              "application/json": {
+                schema: resolver(Project.Info.array()),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        const projects = Project.list()
+        return c.json(projects)
+      },
+    )
+    .get(
+      "/current",
+      describeRoute({
+        summary: "Get current project",
+        description: "Retrieve the currently active project that OpenCode is working with.",
+        operationId: "project.current",
+        responses: {
+          200: {
+            description: "Current project information",
+            content: {
+              "application/json": {
+                schema: resolver(Project.Info),
+              },
+            },
+          },
+        },
+      }),
+      validator("query", z.object({ directory: z.string().optional() })),
+      async (c) => {
+        const directory = c.req.valid("query").directory
+        if (directory) {
+          const { project } = await Project.fromDirectory(directory)
+          return c.json(project)
+        }
+        return c.json(Instance.project)
+      },
+    )
+    .post(
+      "/git/init",
+      describeRoute({
+        summary: "Initialize git repository",
+        description: "Create a git repository for the current project and return the refreshed project info.",
+        operationId: "project.initGit",
+        responses: {
+          200: {
+            description: "Project information after git initialization",
+            content: {
+              "application/json": {
+                schema: resolver(Project.Info),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        const dir = Instance.directory
+        const prev = Instance.project
+        const next = await Project.initGit({
+          directory: dir,
+          project: prev,
+        })
+        if (next.id === prev.id && next.vcs === prev.vcs && next.worktree === prev.worktree) return c.json(next)
+        await Instance.reload({
+          directory: dir,
+          worktree: dir,
+          project: next,
+          init: InstanceBootstrap,
+        })
+        return c.json(next)
+      },
+    )
+    .patch(
+      "/:projectID",
+      describeRoute({
+        summary: "Update project",
+        description: "Update project properties such as name, icon, and commands.",
+        operationId: "project.update",
+        responses: {
+          200: {
+            description: "Updated project information",
+            content: {
+              "application/json": {
+                schema: resolver(Project.Info),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator("param", z.object({ projectID: ProjectID.zod })),
+      validator("json", Project.update.schema.omit({ projectID: true })),
+      async (c) => {
+        const projectID = c.req.valid("param").projectID
+        const body = c.req.valid("json")
+        const project = await Project.update({ ...body, projectID })
+        return c.json(project)
+      },
+    )
+    .get(
+      "/:projectID/icon",
+      describeRoute({
+        summary: "Get persisted project icon",
+        description: "Return the uploaded project icon asset for a project.",
+        operationId: "project.icon",
+        responses: {
+          200: {
+            description: "Project icon bytes",
+          },
+          ...errors(404),
+        },
+      }),
+      validator("param", z.object({ projectID: z.string() })),
+      async (c) => {
+        const projectID = c.req.valid("param").projectID
+        const iconPath = await Project.iconPath(projectID)
+        if (!iconPath || !existsSync(iconPath)) {
+          return c.notFound()
+        }
+        const file = Bun.file(iconPath)
+        return new Response(file, {
+          headers: {
+            "content-type": file.type || "application/octet-stream",
+            "cache-control": "public, max-age=31536000, immutable",
+          },
+        })
+      },
+    )
+    .delete(
+      "/:projectID",
+      describeRoute({
+        summary: "Delete project",
+        description: "Delete a project and cascade delete dependent data such as sessions.",
+        operationId: "project.delete",
+        responses: {
+          200: {
+            description: "Project deleted",
+            content: {
+              "application/json": {
+                schema: resolver(z.boolean()),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator("param", z.object({ projectID: z.string() })),
+      async (c) => {
+        const projectID = c.req.valid("param").projectID
+        await Project.remove({ projectID })
+        return c.json(true)
+      },
+    )
+    .get(
+      "/:projectID/workspace-toggles",
+      describeRoute({
+        summary: "Get workspace toggles",
+        description: "Get the persisted workspace visibility toggles for a project.",
+        operationId: "project.workspaceToggles",
+        responses: {
+          200: {
+            description: "Workspace toggle state",
+            content: {
+              "application/json": {
+                schema: resolver(Project.WorkspaceToggles),
+              },
+            },
+          },
+          ...errors(404),
+        },
+      }),
+      validator("param", z.object({ projectID: z.string() })),
+      async (c) => {
+        const projectID = c.req.valid("param").projectID
+        return c.json(Project.getWorkspaceToggles(projectID))
+      },
+    )
+    .get(
+      "/:projectID/workspace-paths",
+      describeRoute({
+        summary: "Get workspace path status",
+        description: "Get path existence status for project worktree and sandboxes.",
+        operationId: "project.workspacePaths",
+        responses: {
+          200: {
+            description: "Workspace path status",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    projectID: z.string(),
+                    paths: z.array(
+                      z.object({
+                        path: z.string(),
+                        kind: z.enum(["worktree", "sandbox"]),
+                        exists: z.boolean(),
+                      }),
+                    ),
+                  }),
+                ),
+              },
+            },
+          },
+          ...errors(404),
+        },
+      }),
+      validator("param", z.object({ projectID: z.string() })),
+      async (c) => {
+        const projectID = c.req.valid("param").projectID
+        const project = Project.get(projectID)
+        if (!project) throw new Error(`Project not found: ${projectID}`)
+
+        return c.json({
+          projectID,
+          paths: [
+            { path: project.worktree, kind: "worktree" as const, exists: existsSync(project.worktree) },
+            ...project.sandboxes.map((path) => ({ path, kind: "sandbox" as const, exists: existsSync(path) })),
+          ],
+        })
+      },
+    )
+    .patch(
+      "/:projectID/workspace-toggles",
+      describeRoute({
+        summary: "Update workspace toggles",
+        description: "Update persisted workspace visibility toggles for a project.",
+        operationId: "project.workspaceTogglesPatch",
+        responses: {
+          200: {
+            description: "Workspace toggle state after update",
+            content: {
+              "application/json": {
+                schema: resolver(Project.WorkspaceToggles),
+              },
+            },
+          },
+          409: {
+            description: "Conflict due to stale version",
+            content: {
+              "application/json": {
+                schema: resolver(Project.WorkspaceToggles),
+              },
+            },
+          },
+          ...errors(404),
+        },
+      }),
+      validator("param", z.object({ projectID: z.string() })),
+      validator("json", Project.WorkspaceToggles),
+      async (c) => {
+        const projectID = c.req.valid("param").projectID
+        const body = c.req.valid("json")
+        const result = await Project.updateWorkspaceToggles({
+          projectID,
+          version: body.version,
+          toggles: body.toggles,
+        })
+        return c.json(result.data, result.status)
+      },
+    ),
+)
