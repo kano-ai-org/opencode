@@ -2010,15 +2010,12 @@ export default function Layout(props: ParentProps) {
 
   const workspaceSidebarCtx: WorkspaceSidebarContext = {
     currentDir,
+    navList: () => [],
     sidebarExpanded,
     sidebarHovering,
-    nav: () => state.nav,
-    hoverSession: () => state.hoverSession,
-    setHoverSession: (id) => setState("hoverSession", id),
     clearHoverProjectSoon,
     prefetchSession,
     archiveSession,
-    renameSession,
     workspaceName,
     renameWorkspace,
     editorOpen,
@@ -2061,17 +2058,10 @@ export default function Layout(props: ParentProps) {
     workspaceLabel,
     sessionProps: {
       sidebarExpanded,
-      sidebarHovering,
-      nav: () => state.nav,
-      hoverSession: () => state.hoverSession,
-      setHoverSession: (id) => setState("hoverSession", id),
+      navList: () => [],
       clearHoverProjectSoon,
       prefetchSession,
       archiveSession,
-      renameSession,
-      editorOpen,
-      openEditor,
-      InlineEditor,
     },
   }
 
