@@ -50,6 +50,7 @@ type HomeSessionGroup = {
   title: string
   sessions: HomeSessionRecord[]
 }
+import { normalizeProjectPath } from "@/utils/normalize-project-path"
 
 export default function Home() {
   const settings = useSettings()
@@ -124,9 +125,11 @@ function HomeDesign() {
   }
 
   function addProject(directory: string) {
-    layout.projects.open(directory)
-    server.projects.touch(directory)
-    setState("project", directory)
+    const normalized = normalizeProjectPath(directory)
+    if (!normalized) return
+    layout.projects.open(normalized)
+    server.projects.touch(normalized)
+    setState("project", normalized)
   }
 
   function openNewSession() {
@@ -703,9 +706,11 @@ function LegacyHome() {
   })
 
   function openProject(directory: string) {
-    layout.projects.open(directory)
-    server.projects.touch(directory)
-    navigate(`/${base64Encode(directory)}`)
+    const normalized = normalizeProjectPath(directory)
+    if (!normalized) return
+    layout.projects.open(normalized)
+    server.projects.touch(normalized)
+    navigate(`/${base64Encode(normalized)}`)
   }
 
   async function chooseProject() {

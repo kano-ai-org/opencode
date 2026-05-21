@@ -6,11 +6,12 @@ import { createStore } from "solid-js/store"
 import { useLayout } from "@/context/layout"
 import { useLanguage } from "@/context/language"
 import { useLocation, useNavigate } from "@solidjs/router"
-import { base64Encode } from "@opencode-ai/util/encode"
+import { base64Encode } from "@opencode-ai/core/util/encode"
 import { useServer } from "@/context/server"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { workspaceMatch } from "@/pages/layout/helpers"
 import { Avatar } from "@opencode-ai/ui/avatar"
+import { normalizeProjectPath } from "@/utils/normalize-project-path"
 
 const isTempProject = (worktree: string) => {
   const value = worktree.replace(/\\/g, "/").toLowerCase()
@@ -49,6 +50,7 @@ const WorkspaceIcon = (props: { icon?: { url?: string; override?: string; color?
     <Avatar
       fallback={props.title}
       src={props.icon?.override ?? props.icon?.url}
+      fallbackSrc={props.icon?.override && props.icon?.url ? props.icon.url : undefined}
       style={{ background: props.icon?.color }}
       class="size-full rounded-[6px]"
     />
@@ -77,11 +79,56 @@ export const SettingsWorkspaceSync: Component = () => {
 
   const [snapshot] = createResource(
     () => tick(),
-    () => layout.workspaceSync.snapshot().catch(() => []),
+    () => {
+      const load = layout.workspaceSync?.snapshot
+      if (!load) return Promise.resolve([])
+      return load().catch(() => [])
+    },
   )
 
-  const local = createMemo(() => layout.workspaceSync.localKeys())
-  const rows = createMemo(() => snapshot() ?? [])
+  const local = createMemo(() => {
+    const value = layout.workspaceSync?.localKeys?.()
+    return Array.isArray(value) ? value : []
+  })
+  const rows = createMemo(() => {
+    const value = snapshot()
+    if (!Array.isArray(value)) return []
+    return value.map((row) => {
+      if (!row || typeof row !== "object") {
+        return {
+          worktree: "",
+          projectID: "",
+          source: "unknown",
+          pathStatus: "unknown",
+          version: 0,
+          sandboxCount: 0,
+          sessionCount: 0,
+          sandboxes: [],
+          missingPaths: [],
+          local: [],
+          remote: [],
+          sessions: [],
+          icon: undefined,
+        }
+      }
+      const item = row as Record<string, unknown>
+      return {
+        ...item,
+        worktree: typeof item.worktree === "string" ? item.worktree : "",
+        projectID: typeof item.projectID === "string" ? item.projectID : "",
+        source: typeof item.source === "string" ? item.source : "unknown",
+        pathStatus: typeof item.pathStatus === "string" ? item.pathStatus : "unknown",
+        version: typeof item.version === "number" ? item.version : 0,
+        sandboxCount: typeof item.sandboxCount === "number" ? item.sandboxCount : 0,
+        sessionCount: typeof item.sessionCount === "number" ? item.sessionCount : 0,
+        sandboxes: Array.isArray(item.sandboxes) ? item.sandboxes : [],
+        missingPaths: Array.isArray(item.missingPaths) ? item.missingPaths : [],
+        local: Array.isArray(item.local) ? item.local : [],
+        remote: Array.isArray(item.remote) ? item.remote : [],
+        sessions: Array.isArray(item.sessions) ? item.sessions : [],
+      }
+    })
+  })
   const query = createMemo(() => search.query.trim().toLowerCase())
   const filteredRows = createMemo(() => {
     const input = query()
@@ -258,8 +305,10 @@ export const SettingsWorkspaceSync: Component = () => {
   }
 
   const openProject = (worktree: string) => {
-    layout.projects.open(worktree)
-    navigate(`/${base64Encode(worktree)}`)
+    const normalized = normalizeProjectPath(worktree)
+    if (!normalized) return
+    layout.projects.open(normalized)
+    navigate(`/${base64Encode(normalized)}`)
   }
 
   const removeProject = (projectID: string) => {
@@ -333,10 +382,10 @@ export const SettingsWorkspaceSync: Component = () => {
           {server.identity() ? null : <p class="text-11-regular text-text-warning-base break-all">identity status: {server.identityError() ?? "resolving"}</p>}
           <p class="text-12-regular text-text-weak">Sources: merged, opened, indexed.</p>
           <div class="flex flex-wrap gap-2">
-            <Button variant="secondary" size="small" onClick={refreshSafe} class="min-h-9 px-3">
+            <Button variant="secondary" size="small" onClick={refreshSafe} class="min-h-10 px-3">
               Refresh from server
             </Button>
-            <Button variant="secondary" size="small" onClick={copyDiagnostics} class="min-h-9 px-3">
+            <Button variant="secondary" size="small" onClick={copyDiagnostics} class="min-h-10 px-3">
               Copy diagnostics JSON
             </Button>
           </div>
@@ -476,10 +525,10 @@ export const SettingsWorkspaceSync: Component = () => {
               <div class="border border-border-weak-base rounded-lg p-4 bg-surface-raised-base">
                 <div class="text-13-medium text-text-strong mb-2">Session transfer</div>
                 <div class="flex flex-wrap gap-2">
-                  <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={pullExport} disabled={transfer.busy}>
+                  <Button variant="secondary" size="small" class="min-h-10 px-3" onClick={pullExport} disabled={transfer.busy}>
                     Export JSON
                   </Button>
-                  <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => upload?.click()} disabled={transfer.busy}>
+                  <Button variant="secondary" size="small" class="min-h-10 px-3" onClick={() => upload?.click()} disabled={transfer.busy}>
                     Import file
                   </Button>
                 </div>
@@ -506,7 +555,7 @@ export const SettingsWorkspaceSync: Component = () => {
                     <Button
                       variant="secondary"
                       size="small"
-                      class="min-h-9 px-3"
+                      class="min-h-10 px-3"
                       onClick={pushUrl}
                       disabled={transfer.busy || !transfer.url.trim()}
                     >
@@ -559,16 +608,16 @@ export const SettingsWorkspaceSync: Component = () => {
                       <div class="text-11-regular text-text-weak">source: {row.source} | sandboxes: {row.sandboxCount}</div>
                       <div class="text-11-regular text-text-weak">sessions: {row.sessionCount}</div>
                       <div class="flex flex-wrap gap-2 pt-2">
-                        <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openProject(row.worktree)}>
+                        <Button variant="secondary" size="small" class="min-h-10 px-3" onClick={() => openProject(row.worktree)}>
                           Open project
                         </Button>
-                        <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openDetail(row.worktree)}>
+                        <Button variant="secondary" size="small" class="min-h-10 px-3" onClick={() => openDetail(row.worktree)}>
                           Session details
                         </Button>
                         <Button
                           variant="secondary"
                           size="small"
-                          class="min-h-9 px-3"
+                          class="min-h-10 px-3"
                           onClick={() => removeProject(row.projectID)}
                           disabled={isGlobalProject(row.projectID)}
                         >
@@ -622,16 +671,16 @@ export const SettingsWorkspaceSync: Component = () => {
                       <div class="text-11-regular text-text-weak">source: {row.source} | sandboxes: {row.sandboxCount}</div>
                       <div class="text-11-regular text-text-weak">sessions: {row.sessionCount}</div>
                       <div class="flex flex-wrap gap-2 pt-2">
-                        <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openProject(row.worktree)}>
+                        <Button variant="secondary" size="small" class="min-h-10 px-3" onClick={() => openProject(row.worktree)}>
                           Open project
                         </Button>
-                        <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openDetail(row.worktree)}>
+                        <Button variant="secondary" size="small" class="min-h-10 px-3" onClick={() => openDetail(row.worktree)}>
                           Session details
                         </Button>
                         <Button
                           variant="secondary"
                           size="small"
-                          class="min-h-9 px-3"
+                          class="min-h-10 px-3"
                           onClick={() => removeProject(row.projectID)}
                           disabled={isGlobalProject(row.projectID)}
                         >
@@ -664,16 +713,16 @@ export const SettingsWorkspaceSync: Component = () => {
                       <div class="text-11-regular text-text-weak">source: {row.source} | sandboxes: {row.sandboxCount}</div>
                       <div class="text-11-regular text-text-weak">sessions: {row.sessionCount}</div>
                       <div class="flex flex-wrap gap-2 pt-2">
-                        <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openProject(row.worktree)}>
+                        <Button variant="secondary" size="small" class="min-h-10 px-3" onClick={() => openProject(row.worktree)}>
                           Open project
                         </Button>
-                        <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openDetail(row.worktree)}>
+                        <Button variant="secondary" size="small" class="min-h-10 px-3" onClick={() => openDetail(row.worktree)}>
                           Session details
                         </Button>
                         <Button
                           variant="secondary"
                           size="small"
-                          class="min-h-9 px-3"
+                          class="min-h-10 px-3"
                           onClick={() => removeProject(row.projectID)}
                           disabled={isGlobalProject(row.projectID)}
                         >
@@ -710,16 +759,16 @@ export const SettingsWorkspaceSync: Component = () => {
                       <div class="text-11-regular text-text-weak">source: {row.source}</div>
                       <div class="text-11-regular text-text-weak">sessions: {row.sessionCount}</div>
                       <div class="flex flex-wrap gap-2 pt-2">
-                        <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openProject(row.worktree)}>
+                        <Button variant="secondary" size="small" class="min-h-10 px-3" onClick={() => openProject(row.worktree)}>
                           Open project
                         </Button>
-                        <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openDetail(row.worktree)}>
+                        <Button variant="secondary" size="small" class="min-h-10 px-3" onClick={() => openDetail(row.worktree)}>
                           Session details
                         </Button>
                         <Button
                           variant="secondary"
                         size="small"
-                        class="min-h-9 px-3"
+                        class="min-h-10 px-3"
                         onClick={() => removeProject(row.projectID)}
                         disabled={isGlobalProject(row.projectID)}
                       >
@@ -758,16 +807,16 @@ export const SettingsWorkspaceSync: Component = () => {
                       </div>
                     </div>
                     <div class="flex flex-wrap gap-2">
-                      <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openProject(row.worktree)}>
+                      <Button variant="secondary" size="small" class="min-h-10 px-3" onClick={() => openProject(row.worktree)}>
                         Open project
                       </Button>
-                      <Button variant="secondary" size="small" class="min-h-9 px-3" onClick={() => openDetail(row.worktree)}>
+                      <Button variant="secondary" size="small" class="min-h-10 px-3" onClick={() => openDetail(row.worktree)}>
                         Session details
                       </Button>
                       <Button
                         variant="secondary"
                         size="small"
-                        class="min-h-9 px-3"
+                        class="min-h-10 px-3"
                         onClick={() => removeProject(row.projectID)}
                         disabled={isGlobalProject(row.projectID)}
                       >

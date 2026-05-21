@@ -66,6 +66,7 @@ import { Titlebar, type TitlebarUpdate } from "@/components/titlebar"
 import { useServer } from "@/context/server"
 import { useLanguage, type Locale } from "@/context/language"
 import { pathKey } from "@/utils/path-key"
+import { normalizeProjectPath } from "@/utils/normalize-project-path"
 import {
   displayName,
   effectiveWorkspaceOrder,
@@ -1393,8 +1394,10 @@ export default function Layout(props: ParentProps) {
   }
 
   function openProject(directory: string, navigate = true) {
-    layout.projects.open(directory)
-    if (navigate) return navigateToProject(directory)
+    const normalized = normalizeProjectPath(directory)
+    if (!normalized) return
+    layout.projects.open(normalized)
+    if (navigate) return navigateToProject(normalized)
   }
 
   const handleDeepLinks = (urls: string[]) => {
