@@ -24,6 +24,15 @@ function sortSessions(now: number) {
 const isRootVisibleSession = (session: Session, directory: string) =>
   pathKey(session.directory) === pathKey(directory) && !session.parentID && !session.time?.archived
 
+export const workspaceMatch = (left: string, right: string) => {
+  const leftKey = pathKey(left)
+  const rightKey = pathKey(right)
+  if (leftKey === rightKey) return true
+  const leftTail = leftKey.split("/").filter(Boolean).slice(-2).join("/")
+  if (!leftTail) return false
+  return leftTail === rightKey.split("/").filter(Boolean).slice(-2).join("/")
+}
+
 export const roots = (store: SessionStore) =>
   (store.session ?? []).filter((session) => isRootVisibleSession(session, store.path.directory))
 
@@ -50,6 +59,14 @@ export const childSessionOnPath = (sessions: Session[] | undefined, rootID: stri
     if (session.parentID === rootID) return session
     id = session.parentID
   }
+}
+
+export function getDraggableId(event: unknown): string | undefined {
+  if (typeof event !== "object" || event === null) return undefined
+  if (!("draggable" in event)) return undefined
+  const draggable = (event as { draggable?: { id?: unknown } }).draggable
+  if (!draggable) return undefined
+  return typeof draggable.id === "string" ? draggable.id : undefined
 }
 
 export const displayName = (project: { name?: string; worktree: string }) =>

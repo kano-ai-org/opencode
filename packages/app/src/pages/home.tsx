@@ -13,6 +13,7 @@ import { DialogSelectServer } from "@/components/dialog-select-server"
 import { useServer } from "@/context/server"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
+import { normalizeProjectPath } from "@/utils/normalize-project-path"
 
 export default function Home() {
   const sync = useGlobalSync()
@@ -38,9 +39,11 @@ export default function Home() {
   })
 
   function openProject(directory: string) {
-    layout.projects.open(directory)
-    server.projects.touch(directory)
-    navigate(`/${base64Encode(directory)}`)
+    const normalized = normalizeProjectPath(directory)
+    if (!normalized) return
+    layout.projects.open(normalized)
+    server.projects.touch(normalized)
+    navigate(`/${base64Encode(normalized)}`)
   }
 
   async function chooseProject() {
