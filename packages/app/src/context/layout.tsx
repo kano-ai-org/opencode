@@ -783,6 +783,22 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     })
 
     createEffect(() => {
+      if (!globalSync.ready) return
+      if (server.projects.list().length > 0) return
+
+      const indexed = globalSync.data.project
+        .map((project) => rootFor(project.worktree))
+        .filter((worktree, index, list) => list.findIndex((item) => workspaceKey(item) === workspaceKey(worktree)) === index)
+      if (indexed.length === 0) return
+
+      batch(() => {
+        for (const worktree of indexed) {
+          server.projects.open(worktree)
+        }
+      })
+    })
+
+    createEffect(() => {
       if (!workspaceSyncEnabled()) return
 
       const roots = new Map<string, string>()

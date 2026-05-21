@@ -2,6 +2,9 @@ import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Effect, Stream } from "effect"
 import { HttpBody, HttpClient, HttpClientRequest, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { createHash } from "node:crypto"
+import { readdir } from "node:fs/promises"
+import * as path from "node:path"
+import { fileURLToPath } from "node:url"
 import { ProxyUtil } from "../proxy-util"
 
 let embeddedUIPromise: Promise<Record<string, string> | null> | undefined
@@ -42,10 +45,57 @@ export function upstreamURL(path: string) {
 }
 
 export function embeddedUI(disableEmbeddedWebUi: boolean) {
-  if (disableEmbeddedWebUi) return Promise.resolve(null)
+  if (disableEmbeddedWebUi) return (embeddedUIPromise ??= loadLocalWebUiDist())
   return (embeddedUIPromise ??=
     // @ts-expect-error - generated file at build time
-    import("opencode-web-ui.gen.ts").then((module) => module.default as Record<string, string>).catch(() => null))
+    import("opencode-web-ui.gen.ts")
+      .then((module) => module.default as Record<string, string>)
+      .catch(() => loadLocalWebUiDist()))
+}
+
+async function loadLocalWebUiDist() {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url))
+  const candidates = [
+    path.resolve(process.cwd(), "../app/dist"),
+    path.resolve(process.cwd(), "packages/app/dist"),
+    path.resolve(process.cwd(), "src/opencode/packages/app/dist"),
+    path.resolve(process.cwd(), "../../app/dist"),
+    path.resolve(moduleDir, "../../../../app/dist"),
+  ]
+
+  for (const dist of candidates) {
+    const files = await collectDistFiles(dist)
+    if (!files) continue
+    return files
+  }
+
+  return null
+}
+
+async function collectDistFiles(dist: string) {
+  const files: Record<string, string> = {}
+  const ok = await walkDist(dist, "", files)
+  if (!ok) return null
+  if (!files["index.html"]) return null
+  return files
+}
+
+async function walkDist(dist: string, relative: string, files: Record<string, string>) {
+  const current = relative ? path.join(dist, relative) : dist
+  const entries = await readdir(current, { withFileTypes: true }).catch(() => undefined)
+  if (!entries) return false
+
+  for (const entry of entries) {
+    const nextRelative = relative ? `${relative}/${entry.name}` : entry.name
+    if (entry.isDirectory()) {
+      const ok = await walkDist(dist, nextRelative, files)
+      if (!ok) continue
+      continue
+    }
+    files[nextRelative] = path.join(dist, nextRelative)
+  }
+
+  return true
 }
 
 function notFound() {
@@ -54,7 +104,7 @@ function notFound() {
 
 function embeddedUIResponse(file: string, body: Uint8Array) {
   const mime = AppFileSystem.mimeType(file)
-  const headers = new Headers({ "content-type": mime })
+  const headers = new Headers({ "content-type": mime, "x-opencode-ui-origin": "embedded" })
   if (mime.startsWith("text/html")) {
     headers.set("content-security-policy", cspForHtml(new TextDecoder().decode(body)))
   }
