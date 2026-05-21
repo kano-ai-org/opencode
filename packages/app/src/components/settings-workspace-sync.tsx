@@ -50,7 +50,6 @@ const WorkspaceIcon = (props: { icon?: { url?: string; override?: string; color?
     <Avatar
       fallback={props.title}
       src={props.icon?.override ?? props.icon?.url}
-      fallbackSrc={props.icon?.override && props.icon?.url ? props.icon.url : undefined}
       style={{ background: props.icon?.color }}
       class="size-full rounded-[6px]"
     />
@@ -76,6 +75,7 @@ export const SettingsWorkspaceSync: Component = () => {
     showSubagent: false,
   })
   let upload: HTMLInputElement | undefined
+  const serverUrl = createMemo(() => server.current?.http.url ?? "")
 
   const [snapshot] = createResource(
     () => tick(),
@@ -181,7 +181,7 @@ export const SettingsWorkspaceSync: Component = () => {
 
   const pullExport = () => {
     setTransfer("busy", true)
-    void fetch(`${server.url}/session/export`, { headers: headers() })
+    void fetch(`${serverUrl()}/session/export`, { headers: headers() })
       .then(async (response) => {
         if (!response.ok) throw new Error(`export failed: ${response.status}`)
         const blob = await response.blob()
@@ -206,7 +206,7 @@ export const SettingsWorkspaceSync: Component = () => {
     const form = new FormData()
     form.set("file", file)
     setTransfer("busy", true)
-    void fetch(`${server.url}/session/import`, {
+    void fetch(`${serverUrl()}/session/import`, {
       method: "POST",
       headers: headers(),
       body: form,
@@ -228,7 +228,7 @@ export const SettingsWorkspaceSync: Component = () => {
   const pushUrl = () => {
     if (!transfer.url.trim()) return
     setTransfer("busy", true)
-    void fetch(`${server.url}/session/import`, {
+    void fetch(`${serverUrl()}/session/import`, {
       method: "POST",
       headers: headers(true),
       body: JSON.stringify({ url: transfer.url.trim() }),
@@ -277,7 +277,7 @@ export const SettingsWorkspaceSync: Component = () => {
   const currentSessionID = createMemo(() => location.pathname.match(/\/session\/([^/]+)/)?.[1] ?? "")
   const [currentSession] = createResource(currentSessionID, async (id) => {
     if (!id) return
-    const response = await fetch(`${server.url}/session/${encodeURIComponent(id)}`, { headers: headers() }).catch(() => undefined)
+    const response = await fetch(`${serverUrl()}/session/${encodeURIComponent(id)}`, { headers: headers() }).catch(() => undefined)
     if (!response?.ok) return
     return (await response.json().catch(() => undefined)) as
       | { id: string; directory: string; title: string; time?: { archived?: number } }
@@ -348,7 +348,7 @@ export const SettingsWorkspaceSync: Component = () => {
 
   const removeSession = (id: string) => {
     setTransfer("busy", true)
-    void fetch(`${server.url}/session/${encodeURIComponent(id)}`, {
+    void fetch(`${serverUrl()}/session/${encodeURIComponent(id)}`, {
       method: "DELETE",
       headers: headers(),
     })
@@ -377,9 +377,7 @@ export const SettingsWorkspaceSync: Component = () => {
           <p class="text-14-regular text-text-weak">
             Show local cached keys and server keys per project, then refresh on demand.
           </p>
-          <p class="text-12-regular text-text-weak break-all">Current server: {server.url}</p>
-          <p class="text-12-regular text-text-weak break-all">Instance ID: {server.identity() ?? "(resolving...)"}</p>
-          {server.identity() ? null : <p class="text-11-regular text-text-warning-base break-all">identity status: {server.identityError() ?? "resolving"}</p>}
+          <p class="text-12-regular text-text-weak break-all">Current server: {serverUrl()}</p>
           <p class="text-12-regular text-text-weak">Sources: merged, opened, indexed.</p>
           <div class="flex flex-wrap gap-2">
             <Button variant="secondary" size="small" onClick={refreshSafe} class="min-h-10 px-3">

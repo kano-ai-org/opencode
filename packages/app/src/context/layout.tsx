@@ -525,6 +525,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         ...(json ? { "Content-Type": "application/json" } : undefined),
       }
     }
+    const serverUrl = () => server.current?.http.url
 
     const parseWorkspaceState = (value: unknown): WorkspaceTogglesState => {
       if (!isRecord(value)) return EMPTY_WORKSPACE_TOGGLES
@@ -569,7 +570,9 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         await new Promise((resolve) => setTimeout(resolve, 50))
       }
 
-      const match = await fetch(`${server.url}/project/current?directory=${encodeURIComponent(root)}`, {
+      const base = serverUrl()
+      if (!base) return
+      const match = await fetch(`${base}/project/current?directory=${encodeURIComponent(root)}`, {
         headers: requestHeaders(),
       })
         .then((response) => (response.ok ? (response.json() as Promise<Project>) : undefined))
@@ -612,7 +615,9 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
 
     const getWorkspaceToggles = async (project: Pick<Project, "id" | "worktree">) => {
       if (!project.id) return
-      const url = `${server.url}/project/${encodeURIComponent(project.id)}/workspace-toggles?directory=${encodeURIComponent(project.worktree)}`
+      const base = serverUrl()
+      if (!base) return
+      const url = `${base}/project/${encodeURIComponent(project.id)}/workspace-toggles?directory=${encodeURIComponent(project.worktree)}`
       const response = await fetch(url, {
         method: "GET",
         headers: requestHeaders(),
@@ -629,7 +634,9 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       toggles: Record<string, boolean>,
     ) => {
       if (!project.id) return
-      const url = `${server.url}/project/${encodeURIComponent(project.id)}/workspace-toggles?directory=${encodeURIComponent(project.worktree)}`
+      const base = serverUrl()
+      if (!base) return
+      const url = `${base}/project/${encodeURIComponent(project.id)}/workspace-toggles?directory=${encodeURIComponent(project.worktree)}`
       const response = await fetch(url, {
         method: "PATCH",
         headers: requestHeaders(true),
@@ -1054,7 +1061,9 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
                 .filter((key) => workspaceMatch(key, worktree))
                 .sort((a, b) => a.localeCompare(b))
               const remoteKeys = Object.keys(remote.toggles).sort((a, b) => a.localeCompare(b))
-              const sessions = await fetch(`${server.url}/session?projectID=${encodeURIComponent(project.id)}&limit=300`, {
+              const base = serverUrl()
+              if (!base) return
+              const sessions = await fetch(`${base}/session?projectID=${encodeURIComponent(project.id)}&limit=300`, {
                 headers: requestHeaders(),
               })
                 .then(async (response) => {
@@ -1082,7 +1091,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
                 .catch(() => [])
 
               const pathStatus = await fetch(
-                `${server.url}/project/${encodeURIComponent(project.id)}/workspace-paths`,
+                `${base}/project/${encodeURIComponent(project.id)}/workspace-paths`,
                 { headers: requestHeaders() },
               )
                 .then(async (response) => {
@@ -1127,7 +1136,9 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
             .sort((a, b) => a.worktree.localeCompare(b.worktree))
         },
         async deleteProject(projectID: string, worktree?: string) {
-          const response = await fetch(`${server.url}/project/${encodeURIComponent(projectID)}`, {
+          const base = serverUrl()
+          if (!base) throw new Error("server unavailable")
+          const response = await fetch(`${base}/project/${encodeURIComponent(projectID)}`, {
             method: "DELETE",
             headers: requestHeaders(),
           })
