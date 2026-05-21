@@ -1,7 +1,7 @@
 // @refresh reload
 
 import * as Sentry from "@sentry/solid"
-import { iife } from "@opencode-ai/util/iife"
+import { iife } from "@opencode-ai/core/util/iife"
 import { render } from "solid-js/web"
 import { AppBaseProviders, AppInterface } from "@/app"
 import { type Platform, PlatformProvider } from "@/context/platform"

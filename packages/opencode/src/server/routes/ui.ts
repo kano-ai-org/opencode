@@ -1,7 +1,7 @@
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
-import { Effect, Stream } from "effect"
-import { HttpBody, HttpClient, HttpClientRequest, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { Effect, Exit, Stream } from "effect"
+import { HttpBody, HttpClient, HttpClientRequest, HttpClientResponse, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { Hono } from "hono"
 import { proxy } from "hono/proxy"
 import { getMimeType } from "hono/utils/mime"
@@ -135,11 +135,11 @@ export function serveUIEffect(
 
     const origins = webUIOrigins()
     let response: {
-      value: HttpClient.HttpClient.Response
+      value: HttpClientResponse.HttpClientResponse
       origin: URL
     } | undefined
     for (const origin of origins) {
-      const attempted = yield* Effect.either(
+      const attempted = yield* Effect.exit(
         services.client.execute(
           HttpClientRequest.make(request.method)(new URL(pathWithSearch, origin).toString(), {
             headers: ProxyUtil.headers(request.headers, { host: origin.host }),
@@ -147,9 +147,9 @@ export function serveUIEffect(
           }),
         ),
       )
-      if (attempted._tag === "Right") {
+      if (Exit.isSuccess(attempted)) {
         response = {
-          value: attempted.right,
+          value: attempted.value,
           origin,
         }
         break

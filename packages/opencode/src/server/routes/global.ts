@@ -17,7 +17,7 @@ import { Config } from "@/config/config"
 import { errors } from "../error"
 
 import { InstanceID } from "@/global/identity"
-import { Global } from "@/global"
+import { Global } from "@opencode-ai/core/global"
 
 const log = Log.create({ service: "server" })
 

@@ -543,9 +543,13 @@
       }
 
       [data-slot="tabs-trigger-wrapper"] {
-        height: 32px;
+        height: 44px;
         border: none;
         border-radius: var(--radius-md);
+
+        @media (min-width: 640px) {
+          height: 32px;
+        }
 
         /* text-14-medium */
         font-family: var(--font-family-sans);

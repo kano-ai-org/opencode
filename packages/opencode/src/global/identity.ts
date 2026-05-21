@@ -1,5 +1,5 @@
 import path from "path"
-import { Global } from "."
+import { Global } from "@opencode-ai/core/global"
 
 const file = path.join(Global.Path.state, "instance-id")
 
