@@ -1005,7 +1005,7 @@ export default function Layout(props: ParentProps) {
 
     const [, setStore] = globalSync.child(session.directory)
 
-    await globalSDK.client.session
+    await serverSDK.client.session
       .update({
         directory: session.directory,
         sessionID: session.id,

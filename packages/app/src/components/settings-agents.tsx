@@ -3,8 +3,8 @@ import { createStore } from "solid-js/store"
 import { Button } from "@opencode-ai/ui/button"
 import { Select } from "@opencode-ai/ui/select"
 import { showToast } from "@opencode-ai/ui/toast"
-import { useGlobalSDK } from "@/context/global-sdk"
-import { useGlobalSync } from "@/context/global-sync"
+import { useServerSDK } from "@/context/server-sdk"
+import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import { useModels } from "@/context/models"
 
@@ -184,8 +184,8 @@ function allParents(start: string) {
 }
 
 export const SettingsAgents: Component = () => {
-  const globalSDK = useGlobalSDK()
-  const globalSync = useGlobalSync()
+  const serverSDK = useServerSDK()
+  const globalSync = useServerSync()
   const language = useLanguage()
   const models = useModels()
   const [draft, setDraft] = createStore<Record<string, string>>({})
@@ -194,7 +194,7 @@ export const SettingsAgents: Component = () => {
   const [agentData] = createResource(
     () => globalSync.data.path.directory,
     (directory) =>
-      globalSDK.client.app
+      serverSDK.client.app
         .agents(directory ? { directory } : undefined)
         .then((result) => result.data ?? [])
         .catch((error) => {
@@ -229,7 +229,7 @@ export const SettingsAgents: Component = () => {
         const absolute = resolveAbsolutePath(candidate.directory, candidate.path)
         if (unique.has(absolute)) continue
         unique.add(absolute)
-        const result = await globalSDK.client.file
+        const result = await serverSDK.client.file
           .read({ directory: candidate.directory, path: candidate.path })
           .catch(() => undefined)
         if (!result?.data?.content || result.data.type !== "text") continue
@@ -278,7 +278,7 @@ export const SettingsAgents: Component = () => {
         const absolutePath = resolveAbsolutePath(item.directory, item.path)
         if (unique.has(absolutePath)) continue
         unique.add(absolutePath)
-        const data = await globalSDK.client.file.read({ directory: item.directory, path: item.path }).catch(() => undefined)
+        const data = await serverSDK.client.file.read({ directory: item.directory, path: item.path }).catch(() => undefined)
         if (!data?.data || data.data.type !== "text") {
           result.push({ ...item, absolutePath, exists: false, agentKeys: 0 })
           continue
@@ -302,7 +302,7 @@ export const SettingsAgents: Component = () => {
     async (directory) => {
       const files = ["opencode.jsonc", "opencode.json", "config.json"]
       for (const path of files) {
-        const data = await globalSDK.client.file.read({ directory, path }).catch(() => undefined)
+        const data = await serverSDK.client.file.read({ directory, path }).catch(() => undefined)
         if (!data?.data || data.data.type !== "text") continue
         return resolveAbsolutePath(directory, path)
       }
