@@ -117,9 +117,17 @@ export function gitbash() {
   if (process.platform !== "win32") return
   if (Flag.OPENCODE_GIT_BASH_PATH) return Flag.OPENCODE_GIT_BASH_PATH
   const git = which("git")
-  if (!git) return
-  const file = path.join(git, "..", "..", "bin", "bash.exe")
-  if (Filesystem.stat(file)?.size) return file
+  if (git) {
+    const file = path.join(git, "..", "..", "bin", "bash.exe")
+    if (Filesystem.stat(file)?.size) return file
+  }
+  const programFiles = [process.env["ProgramFiles"], process.env["ProgramFiles(x86)"]].filter(
+    (value): value is string => Boolean(value),
+  )
+  for (const root of programFiles) {
+    const file = path.join(root, "Git", "bin", "bash.exe")
+    if (Filesystem.stat(file)?.size) return file
+  }
 }
 
 function fallback() {

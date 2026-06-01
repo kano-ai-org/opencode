@@ -2429,7 +2429,7 @@ export default function Layout(props: ParentProps) {
                 aria-label={language.t("sidebar.nav.projectsAndSessions")}
                 data-component="sidebar-nav-desktop"
                 classList={{
-                  "hidden xl:block": true,
+                  "hidden lg:block": true,
                   "absolute inset-y-0 left-0": true,
                   "z-10": true,
                 }}
@@ -2452,7 +2452,7 @@ export default function Layout(props: ParentProps) {
 
               <Show when={layout.sidebar.opened()}>
                 <div
-                  class="hidden xl:block absolute inset-y-0 z-30 w-0 overflow-visible"
+                  class="hidden lg:block absolute inset-y-0 z-30 w-0 overflow-visible"
                   style={{ left: `${side()}px` }}
                   onPointerDown={() => setState("sizing", true)}
                 >
@@ -2472,11 +2472,24 @@ export default function Layout(props: ParentProps) {
               </Show>
 
               <div
-                class="hidden xl:block pointer-events-none absolute top-0 right-0 z-0 border-t border-border-weaker-base"
+                class="hidden lg:block pointer-events-none absolute top-0 right-0 z-0 border-t border-border-weaker-base"
                 style={{ left: "calc(4rem + 12px)" }}
               />
 
-              <div class="xl:hidden">
+              <div class="lg:hidden">
+                <Show when={!layout.mobileSidebar.opened()}>
+                  <div class="fixed left-2 top-12 z-[60]">
+                    <IconButton
+                      icon="menu"
+                      variant="ghost"
+                      class="titlebar-icon rounded-md border border-border-weaker-base bg-background-base"
+                      onClick={layout.mobileSidebar.toggle}
+                      aria-label={language.t("sidebar.menu.toggle")}
+                      aria-expanded={layout.mobileSidebar.opened()}
+                      aria-controls="sidebar-nav-mobile"
+                    />
+                  </div>
+                </Show>
                 <div
                   classList={{
                     "fixed inset-x-0 top-10 bottom-0 z-40 transition-opacity duration-200": true,
@@ -2489,6 +2502,7 @@ export default function Layout(props: ParentProps) {
                 />
                 <nav
                   aria-label={language.t("sidebar.nav.projectsAndSessions")}
+                  id="sidebar-nav-mobile"
                   data-component="sidebar-nav-mobile"
                   classList={{
                     "@container fixed top-10 bottom-0 left-0 z-50 w-full max-w-[400px] overflow-hidden border-r border-border-weaker-base bg-background-base transition-transform duration-200 ease-out": true,
@@ -2504,7 +2518,7 @@ export default function Layout(props: ParentProps) {
               <div
                 classList={{
                   "absolute inset-0": true,
-                  "xl:inset-y-0 xl:right-0 xl:left-[var(--main-left)]": true,
+                  "lg:inset-y-0 lg:right-0 lg:left-[var(--main-left)]": true,
                   "z-20": true,
                   "transition-[left] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[left] motion-reduce:transition-none":
                     !state.sizing,
@@ -2515,7 +2529,7 @@ export default function Layout(props: ParentProps) {
               >
                 <main
                   classList={{
-                    "size-full overflow-x-hidden flex flex-col items-start contain-strict border-t border-border-weak-base bg-background-base xl:border-l xl:rounded-tl-[12px]": true,
+                    "size-full overflow-x-hidden flex flex-col items-start contain-strict border-t border-border-weak-base bg-background-base lg:border-l lg:rounded-tl-[12px]": true,
                   }}
                 >
                   <Show when={!autoselecting.loading} fallback={<div class="size-full" />}>
@@ -2526,7 +2540,7 @@ export default function Layout(props: ParentProps) {
 
               <div
                 classList={{
-                  "hidden xl:flex absolute inset-y-0 left-16 z-30": true,
+                  "hidden lg:flex absolute inset-y-0 left-16 z-30": true,
                   "opacity-100 translate-x-0 pointer-events-auto": state.peeked && !layout.sidebar.opened(),
                   "opacity-0 -translate-x-2 pointer-events-none": !state.peeked || layout.sidebar.opened(),
                   "transition-[opacity,transform] motion-reduce:transition-none": true,
@@ -2550,7 +2564,7 @@ export default function Layout(props: ParentProps) {
 
               <div
                 classList={{
-                  "hidden xl:block pointer-events-none absolute inset-y-0 right-0 z-25 overflow-hidden": true,
+                  "hidden lg:block pointer-events-none absolute inset-y-0 right-0 z-25 overflow-hidden": true,
                   "opacity-100 translate-x-0": state.peeked && !layout.sidebar.opened(),
                   "opacity-0 -translate-x-2": !state.peeked || layout.sidebar.opened(),
                   "transition-[opacity,transform] motion-reduce:transition-none": true,

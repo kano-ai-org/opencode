@@ -577,13 +577,35 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       })
         .then((response) => (response.ok ? (response.json() as Promise<Project>) : undefined))
         .catch(() => undefined)
-      if (!match?.id) return
+      if (match?.id) {
+        return {
+          id: match.id,
+          worktree: match.worktree,
+          sandboxes: match.sandboxes ?? [],
+          icon: match.icon,
+        }
+      }
+
+      const listed = await fetch(`${base}/project`, {
+        headers: requestHeaders(),
+      })
+        .then(async (response) => {
+          if (!response.ok) return [] as Project[]
+          const body = await response.json().catch(() => undefined)
+          if (!Array.isArray(body)) return [] as Project[]
+          return body as Project[]
+        })
+        .catch(() => [] as Project[])
+      const listedMatch = listed.find(
+        (project) => workspaceMatch(project.worktree, root) || (project.sandboxes ?? []).some((sandbox) => workspaceMatch(sandbox, root)),
+      )
+      if (!listedMatch?.id) return
 
       return {
-        id: match.id,
-        worktree: match.worktree,
-        sandboxes: match.sandboxes ?? [],
-        icon: match.icon,
+        id: listedMatch.id,
+        worktree: listedMatch.worktree,
+        sandboxes: listedMatch.sandboxes ?? [],
+        icon: listedMatch.icon,
       }
     }
 
@@ -963,6 +985,58 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       if (sessionTimer !== undefined) window.clearTimeout(sessionTimer)
     })
 
+    const resolveWorkspaceRoots = async () => {
+      const roots = new Set<string>([...indexedWorkspaceRoots(), ...openedWorkspaceRoots()])
+      if (roots.size > 0) return roots
+
+      const base = serverUrl()
+      if (!base) return roots
+
+      const projects = await fetch(`${base}/project`, { headers: requestHeaders() })
+        .then(async (response) => {
+          if (!response.ok) return [] as Project[]
+          const body = await response.json().catch(() => undefined)
+          if (!Array.isArray(body)) return [] as Project[]
+          return body as Project[]
+        })
+        .catch(() => [] as Project[])
+
+      for (const project of projects) {
+        if (!project?.worktree) continue
+        roots.add(rootFor(project.worktree))
+      }
+
+      if (roots.size > 0) return roots
+
+      const sessions = await fetch(`${base}/session?limit=300`, { headers: requestHeaders() })
+        .then(async (response) => {
+          if (!response.ok) return [] as { directory?: string }[]
+          const body = await response.json().catch(() => undefined)
+          if (!Array.isArray(body)) return [] as { directory?: string }[]
+          return body as { directory?: string }[]
+        })
+        .catch(() => [] as { directory?: string }[])
+
+      for (const session of sessions) {
+        if (!session?.directory) continue
+        roots.add(rootFor(session.directory))
+      }
+
+      if (roots.size > 0) return roots
+
+      const pathInfo = await fetch(`${base}/path`, { headers: requestHeaders() })
+        .then(async (response) => {
+          if (!response.ok) return undefined
+          return (await response.json().catch(() => undefined)) as { worktree?: string; directory?: string } | undefined
+        })
+        .catch(() => undefined)
+
+      if (pathInfo?.worktree) roots.add(rootFor(pathInfo.worktree))
+      if (pathInfo?.directory) roots.add(rootFor(pathInfo.directory))
+
+      return roots
+    }
+
     return {
       ready,
       handoff: {
@@ -1056,7 +1130,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       workspaceSync: {
         localKeys: createMemo(() => Object.keys(store.sidebar.workspaces).sort((a, b) => a.localeCompare(b))),
         async refresh() {
-          const roots = new Set<string>([...indexedWorkspaceRoots(), ...openedWorkspaceRoots()])
+          const roots = await resolveWorkspaceRoots()
           for (const root of roots) {
             await hydrateWorkspaceToggles(root, true)
           }
@@ -1064,18 +1138,36 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         async snapshot() {
           const opened = new Set(openedWorkspaceRoots())
           const indexed = new Set(indexedWorkspaceRoots())
-          const roots = new Set<string>([...indexed, ...opened])
+          const roots = await resolveWorkspaceRoots()
 
           const rows = await Promise.all(
             Array.from(roots).map(async (worktree) => {
-              const project = await resolveWorkspaceProject(worktree)
-              if (!project?.id) return
-              const remote = await getWorkspaceToggles(project)
-              if (!remote) return
-
               const local = Object.keys(store.sidebar.workspaces)
                 .filter((key) => workspaceMatch(key, worktree))
                 .sort((a, b) => a.localeCompare(b))
+
+              const project = await resolveWorkspaceProject(worktree)
+              if (!project?.id) {
+                return {
+                  projectID: "",
+                  worktree,
+                  version: 0,
+                  local,
+                  remote: [],
+                  source: opened.has(worktree) && indexed.has(worktree) ? "merged" : opened.has(worktree) ? "opened" : "indexed",
+                  isOpened: opened.has(worktree),
+                  isIndexed: indexed.has(worktree),
+                  sandboxCount: 0,
+                  sandboxes: [],
+                  missingPaths: [],
+                  pathStatus: "unresolved" as const,
+                  sessionCount: 0,
+                  sessions: [],
+                  icon: undefined,
+                } satisfies WorkspaceKeySnapshot
+              }
+              const remote = (await getWorkspaceToggles(project)) ?? EMPTY_WORKSPACE_TOGGLES
+
               const remoteKeys = Object.keys(remote.toggles).sort((a, b) => a.localeCompare(b))
               const base = serverUrl()
               if (!base) return

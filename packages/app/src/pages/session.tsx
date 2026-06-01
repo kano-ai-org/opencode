@@ -262,7 +262,7 @@ export default function Page() {
     ),
   )
 
-  const isDesktop = createMediaQuery("(min-width: 768px)")
+  const isDesktop = createMediaQuery("(min-width: 1024px)")
   const size = createSizing()
   const isV2NewSessionPage = () =>
     shouldUseV2NewSessionPage({ newLayoutDesigns: newSessionDesign(), sessionID: params.id })

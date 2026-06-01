@@ -74,6 +74,10 @@ export const SettingsWorkspaceSync: Component = () => {
     worktree: "",
     showSubagent: false,
   })
+  const [refreshState, setRefreshState] = createStore({
+    busy: false,
+    note: "",
+  })
   let upload: HTMLInputElement | undefined
   const serverUrl = createMemo(() => server.current?.http.url ?? "")
 
@@ -160,12 +164,28 @@ export const SettingsWorkspaceSync: Component = () => {
   )
 
   const refresh = async () => {
+    setRefreshState({ busy: true, note: "Refreshing from server..." })
     await layout.workspaceSync.refresh()
+    const next = await layout.workspaceSync.snapshot().catch(() => [])
+    const count = Array.isArray(next) ? next.length : 0
     setTick((value) => value + 1)
+    setRefreshState({
+      busy: false,
+      note: `Refreshed at ${new Date().toLocaleTimeString()} - ${count} workspace(s) loaded`,
+    })
+    showToast({
+      variant: count > 0 ? "success" : "warning",
+      title: count > 0 ? "Workspace Sync refreshed" : "No workspaces returned",
+      description: count > 0 ? `${count} workspace(s) loaded from server` : "Server returned 0 workspaces for current connection",
+    })
   }
 
   const refreshSafe = () => {
     void refresh().catch((error) => {
+      setRefreshState({
+        busy: false,
+        note: `Refresh failed at ${new Date().toLocaleTimeString()}`,
+      })
       showToast({
         title: language.t("common.requestFailed"),
         description: error instanceof Error ? error.message : String(error),
@@ -379,9 +399,12 @@ export const SettingsWorkspaceSync: Component = () => {
           </p>
           <p class="text-12-regular text-text-weak break-all">Current server: {serverUrl()}</p>
           <p class="text-12-regular text-text-weak">Sources: merged, opened, indexed.</p>
+          <Show when={refreshState.note}>
+            <p class="text-12-regular text-text-weak">{refreshState.note}</p>
+          </Show>
           <div class="flex flex-wrap gap-2">
-            <Button variant="secondary" size="small" onClick={refreshSafe} class="min-h-10 px-3">
-              Refresh from server
+            <Button variant="secondary" size="small" onClick={refreshSafe} class="min-h-10 px-3" disabled={refreshState.busy}>
+              {refreshState.busy ? "Refreshing..." : "Refresh from server"}
             </Button>
             <Button variant="secondary" size="small" onClick={copyDiagnostics} class="min-h-10 px-3">
               Copy diagnostics JSON
