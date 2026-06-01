@@ -805,10 +805,10 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     })
 
     createEffect(() => {
-      if (!globalSync.ready) return
+      if (!serverSync.ready) return
       if (server.projects.list().length > 0) return
 
-      const indexed = globalSync.data.project
+      const indexed = serverSync.data.project
         .map((project) => rootFor(project.worktree))
         .filter((worktree, index, list) => list.findIndex((item) => workspaceKey(item) === workspaceKey(worktree)) === index)
       if (indexed.length === 0) return

@@ -27,10 +27,10 @@ export function useProviders() {
     const [projectStore] = serverSync.child(directory)
     if (!projectStore.provider_ready) return global
     const project = projectStore.provider
-    if (!project.all.length) return global
+    if (project.all.size === 0) return global
 
     const count = (input: typeof global) =>
-      new Map(input.all.map((provider) => [provider.id, Object.keys(provider.models).length]))
+      new Map(Array.from(input.all.values(), (provider) => [provider.id, Object.keys(provider.models).length] as const))
 
     const fresh = (() => {
       const projectCount = count(project)

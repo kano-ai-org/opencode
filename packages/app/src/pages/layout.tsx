@@ -1003,7 +1003,7 @@ export default function Layout(props: ParentProps) {
     const title = next.trim()
     if (!title || title === session.title) return
 
-    const [, setStore] = globalSync.child(session.directory)
+    const [, setStore] = serverSync.child(session.directory)
 
     await serverSDK.client.session
       .update({

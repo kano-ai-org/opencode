@@ -174,7 +174,7 @@ export const SettingsWorkspaceSync: Component = () => {
       note: `Refreshed at ${new Date().toLocaleTimeString()} - ${count} workspace(s) loaded`,
     })
     showToast({
-      variant: count > 0 ? "success" : "warning",
+      variant: count > 0 ? "success" : "default",
       title: count > 0 ? "Workspace Sync refreshed" : "No workspaces returned",
       description: count > 0 ? `${count} workspace(s) loaded from server` : "Server returned 0 workspaces for current connection",
     })
