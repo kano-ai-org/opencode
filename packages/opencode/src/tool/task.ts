@@ -93,6 +93,23 @@ function errorText(error: unknown) {
   return String(error)
 }
 
+function emptySubagentCompletionText(input: {
+  sessionID: SessionID
+  agent: string
+  description: string
+}) {
+  return [
+    "SUBAGENT_EMPTY_COMPLETION",
+    "",
+    `Subagent session ${input.sessionID} completed without a text result.`,
+    `Agent: ${input.agent}`,
+    `Description: ${input.description}`,
+    "",
+    "Treat this as a terminal task failure.",
+    "Do not keep polling, relaunching, or auto-resuming this task without explicit user approval.",
+  ].join("\n")
+}
+
 export const TaskTool = Tool.define(
   id,
   Effect.gen(function* () {
@@ -197,7 +214,14 @@ export const TaskTool = Tool.define(
           },
           parts,
         })
-        return result.parts.findLast((item) => item.type === "text")?.text ?? ""
+        const text = result.parts.findLast((item) => item.type === "text")?.text?.trim()
+        return text && text.length > 0
+          ? text
+          : emptySubagentCompletionText({
+              sessionID: nextSession.id,
+              agent: next.name,
+              description: params.description,
+            })
       })
 
       const inject = Effect.fn("TaskTool.injectBackgroundResult")(function* (

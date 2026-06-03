@@ -120,7 +120,7 @@ const defaultSettings: Settings = {
     shellToolPartsExpanded: false,
     editToolPartsExpanded: false,
     showSessionProgressBar: true,
-    showCustomAgents: false,
+    showCustomAgents: true,
   },
   updates: {
     startup: true,
@@ -169,6 +169,11 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     createEffect(() => {
       if (store.general?.followup !== "queue") return
       setStore("general", "followup", "steer")
+    })
+
+    createEffect(() => {
+      if (store.general?.showCustomAgents === true) return
+      setStore("general", "showCustomAgents", true)
     })
 
     return {
