@@ -54,6 +54,26 @@ type ShellSelectOption = {
   label: string
 }
 
+type ModelConfigPreset = {
+  id: string
+  name: string
+  filename: string
+  active: boolean
+}
+
+type ModelConfigPresetList = {
+  active?: string
+  presets: ModelConfigPreset[]
+}
+
+const emptyModelConfigPresets: ModelConfigPresetList = { presets: [] }
+
+async function readServerJson<T>(response: Response): Promise<T> {
+  if (response.ok) return response.json() as Promise<T>
+  const text = await response.text().catch(() => "")
+  throw new Error(text || response.statusText || `HTTP ${response.status}`)
+}
+
 // To prevent audio from overlapping/playing very quickly when navigating the settings menus,
 // delay the playback by 100ms during quick selection changes and pause existing sounds.
 const stopDemoSound = () => {
@@ -91,6 +111,7 @@ export const SettingsGeneral: Component = () => {
 
   const [store, setStore] = createStore({
     checking: false,
+    applyingModelConfigPreset: false,
   })
 
   const linux = createMemo(() => platform.platform === "desktop" && platform.os === "linux")
@@ -178,6 +199,15 @@ export const SettingsGeneral: Component = () => {
   const serverSync = useServerSync()
   const globalSdk = useServerSDK()
 
+  const [modelConfigPresets, { mutate: setModelConfigPresets, refetch: refetchModelConfigPresets }] = createResource(
+    () =>
+      globalSdk
+        .request("/global/config/presets")
+        .then((response) => readServerJson<ModelConfigPresetList>(response))
+        .catch(() => emptyModelConfigPresets),
+    { initialValue: emptyModelConfigPresets },
+  )
+
   const [shells] = createResource(
     () =>
       globalSdk.client.pty
@@ -205,6 +235,11 @@ export const SettingsGeneral: Component = () => {
 
   const autoOption = { id: "auto", value: "", label: language.t("settings.general.row.shell.autoDefault") }
   const currentShell = createMemo(() => serverSync.data.config.shell ?? "")
+  const modelConfigPresetOptions = createMemo(() => modelConfigPresets().presets)
+  const activeModelConfigPreset = createMemo(() => {
+    const data = modelConfigPresets()
+    return data.presets.find((preset) => preset.id === data.active) ?? data.presets.find((preset) => preset.active)
+  })
 
   const shellOptions = createMemo<ShellSelectOption[]>(() => {
     const list = shells.latest
@@ -236,6 +271,38 @@ export const SettingsGeneral: Component = () => {
 
     return options
   })
+
+  const applyModelConfigPreset = (option: ModelConfigPreset | undefined) => {
+    if (!option) return
+    if (option.id === activeModelConfigPreset()?.id) return
+    if (store.applyingModelConfigPreset) return
+
+    setStore("applyingModelConfigPreset", true)
+    void globalSdk
+      .request("/global/config/presets/apply", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: option.id }),
+      })
+      .then((response) => readServerJson<ModelConfigPresetList>(response))
+      .then((next) => {
+        setModelConfigPresets(next)
+        showToast({
+          variant: "success",
+          icon: "circle-check",
+          title: language.t("settings.general.row.modelConfigPreset.toast.applied.title"),
+          description: language.t("settings.general.row.modelConfigPreset.toast.applied.description", {
+            preset: option.name,
+          }),
+        })
+      })
+      .catch((err: unknown) => {
+        void refetchModelConfigPresets()
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ variant: "error", title: language.t("common.requestFailed"), description: message })
+      })
+      .finally(() => setStore("applyingModelConfigPreset", false))
+  }
 
   const onDisplayBackendChange = (checked: boolean) => {
     const update = platform.setDisplayBackend?.(checked ? "wayland" : "auto")
@@ -351,6 +418,27 @@ export const SettingsGeneral: Component = () => {
             triggerStyle={{ "min-width": "180px" }}
           />
         </SettingsRow>
+
+        <Show when={modelConfigPresetOptions().length > 0}>
+          <SettingsRow
+            title={language.t("settings.general.row.modelConfigPreset.title")}
+            description={language.t("settings.general.row.modelConfigPreset.description")}
+          >
+            <Select
+              data-action="settings-model-config-preset"
+              options={modelConfigPresetOptions()}
+              current={activeModelConfigPreset()}
+              value={(o) => o.id}
+              label={(o) => o.name}
+              onSelect={applyModelConfigPreset}
+              disabled={store.applyingModelConfigPreset}
+              variant="secondary"
+              size="small"
+              triggerVariant="settings"
+              triggerStyle={{ "min-width": "180px" }}
+            />
+          </SettingsRow>
+        </Show>
 
         <SettingsRow
           title={language.t("settings.general.row.reasoningSummaries.title")}

@@ -225,10 +225,22 @@ function createServerSdkContext(server: ServerConnection.Any) {
     fetch: platform.fetch,
     throwOnError: true,
   })
+  const request = (input: string, init?: RequestInit) => {
+    const url = new URL(input, server.http.url)
+    const headers = new Headers(init?.headers)
+    if (server.http.password) {
+      headers.set("Authorization", `Basic ${btoa(`${server.http.username ?? "opencode"}:${server.http.password}`)}`)
+    }
+    return (platform.fetch ?? fetch)(url, {
+      ...init,
+      headers,
+    })
+  }
 
   return {
     url: server.http.url,
     client: sdk,
+    request,
     event: {
       on: emitter.on.bind(emitter),
       listen: emitter.listen.bind(emitter),
