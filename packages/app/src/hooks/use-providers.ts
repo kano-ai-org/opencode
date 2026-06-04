@@ -1,4 +1,5 @@
 import { useServerSync } from "@/context/server-sync"
+import { hasProviderVariantCoverage } from "@/hooks/provider-freshness"
 import { decode64 } from "@/utils/base64"
 import { useParams } from "@solidjs/router"
 import { Iterable, pipe } from "effect"
@@ -35,7 +36,11 @@ export function useProviders() {
     const fresh = (() => {
       const projectCount = count(project)
       const globalCount = count(global)
-      return global.connected.every((id) => (projectCount.get(id) ?? 0) >= (globalCount.get(id) ?? 0))
+      return global.connected.every(
+        (id) =>
+          (projectCount.get(id) ?? 0) >= (globalCount.get(id) ?? 0) &&
+          hasProviderVariantCoverage(global.all.get(id), project.all.get(id)),
+      )
     })()
 
     if (!fresh) return global

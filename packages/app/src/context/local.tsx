@@ -233,7 +233,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
     const configured = () => {
       const item = agent.current()
-      const model = current()
+      const model = item?.model ? models.find(item.model) : current()
       if (!item || !model) return
       return getConfiguredAgentVariant({
         agent: { model: item.model, variant: item.variant },
@@ -327,8 +327,13 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         },
         list() {
           const item = current()
-          if (!item?.variants) return []
-          return Object.keys(item.variants)
+          const variants = Object.keys(item?.variants ?? {})
+          if (variants.length > 0) return variants
+
+          const agentModel = agent.current()?.model
+          if (!agentModel) return []
+          const configuredModel = models.find(agentModel)
+          return Object.keys(configuredModel?.variants ?? {})
         },
         set(value: string | undefined) {
           batch(() => {

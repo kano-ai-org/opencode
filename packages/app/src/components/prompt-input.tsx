@@ -1100,7 +1100,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     />
   )
 
-  const variants = createMemo(() => ["default", ...local.model.variant.list()])
+  const modelVariants = createMemo(() => {
+    const current = local.model.variant.list()
+    if (current.length > 0) return current
+
+    const agentModel = local.agent.current()?.model
+    if (!agentModel) return []
+    return Object.keys(providers.all().get(agentModel.providerID)?.models[agentModel.modelID]?.variants ?? {})
+  })
+  const variants = createMemo(() => ["default", ...modelVariants()])
   const accepting = createMemo(() => {
     const id = params.id
     if (!id) return permission.isAutoAcceptingDirectory(sdk.directory)
@@ -1303,7 +1311,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const agentsLoading = () => agentsQuery.isLoading
   const agentsShouldFadeIn = createMemo((prev) => prev ?? agentsLoading())
-  const providersLoading = () => agentsLoading() || providersQuery.isLoading || globalProvidersQuery.isLoading
+  const providersLoading = () =>
+    agentsLoading() ||
+    ((providersQuery.isLoading || globalProvidersQuery.isLoading) && providers.connected().length === 0)
   const providersShouldFadeIn = createMemo((prev) => prev ?? providersLoading())
 
   const [promptReady] = createResource(
@@ -1317,7 +1327,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   }
 
   const modelControlState = createMemo<ComposerModelControlState>(() => ({
-    loading: providersLoading(),
+    loading: false,
     paid: providers.paid().length > 0,
     title: language.t("command.model.choose"),
     keybind: command.keybind("model.choose"),
@@ -1330,6 +1340,19 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       void import("@/components/dialog-select-model-unpaid").then((x) => {
         dialog.show(() => <x.DialogSelectModelUnpaid model={local.model} />)
       })
+    },
+  }))
+  const variantControlState = createMemo<ComposerVariantControlState>(() => ({
+    loading: false,
+    title: language.t("command.model.variant.cycle"),
+    keybind: command.keybind("model.variant.cycle"),
+    options: variants(),
+    current: local.model.variant.current() ?? "default",
+    style: control(),
+    label: (value) => (value === "default" ? language.t("common.default") : value),
+    onSelect: (value) => {
+      local.model.variant.set(value === "default" ? undefined : value)
+      restoreFocus()
     },
   }))
 
@@ -1569,6 +1592,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     <ComposerPickerTrigger state={newProjectTriggerState()} />
                   </Show>
                   <ComposerModelControl state={modelControlState()} />
+                  <Show when={variantControlState().options.length > 2}>
+                    <ComposerVariantControl state={variantControlState()} />
+                  </Show>
                 </div>
                 <Tooltip placement="top" inactive={!working() && blank()} value={tip()}>
                   <IconButton
@@ -1983,6 +2009,17 @@ type ComposerModelControlState = {
   onUnpaidClick: () => void
 }
 
+type ComposerVariantControlState = {
+  loading: boolean
+  title: string
+  keybind: string
+  options: string[]
+  current: string
+  style: JSX.CSSProperties | undefined
+  label: (value: string) => string
+  onSelect: (value: string | undefined) => void
+}
+
 function ComposerPickerTrigger(props: ComponentProps<"button"> & { state: ComposerPickerTriggerState }) {
   const [local, rest] = splitProps(props, ["state", "class", "style", "onClick"])
   return (
@@ -2149,6 +2186,27 @@ function ComposerModelControl(props: { state: ComposerModelControlState }) {
           </ModelSelectorPopover>
         </TooltipKeybind>
       </Show>
+    </Show>
+  )
+}
+
+function ComposerVariantControl(props: { state: ComposerVariantControlState }) {
+  return (
+    <Show when={!props.state.loading}>
+      <TooltipKeybind placement="top" gutter={4} title={props.state.title} keybind={props.state.keybind}>
+        <Select
+          size="normal"
+          options={props.state.options}
+          current={props.state.current}
+          label={props.state.label}
+          onSelect={props.state.onSelect}
+          class="capitalize max-w-[120px] justify-start text-v2-text-text-faint [&_[data-component=icon]]:text-v2-icon-icon-muted"
+          valueClass="truncate text-[13px] font-[440] leading-5 text-v2-text-text-faint"
+          triggerStyle={props.state.style}
+          triggerProps={{ "data-action": "prompt-model-variant" }}
+          variant="ghost"
+        />
+      </TooltipKeybind>
     </Show>
   )
 }
