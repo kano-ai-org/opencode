@@ -9,6 +9,7 @@ import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { useTheme, type ColorScheme } from "@opencode-ai/ui/theme/context"
 import { showToast } from "@opencode-ai/ui/toast"
 import { useParams } from "@solidjs/router"
+import { useQueryClient } from "@tanstack/solid-query"
 import { useLanguage } from "@/context/language"
 import { usePermission } from "@/context/permission"
 import { usePlatform, type DisplayBackend } from "@/context/platform"
@@ -198,6 +199,7 @@ export const SettingsGeneral: Component = () => {
 
   const serverSync = useServerSync()
   const globalSdk = useServerSDK()
+  const queryClient = useQueryClient()
 
   const [modelConfigPresets, { mutate: setModelConfigPresets, refetch: refetchModelConfigPresets }] = createResource(
     () =>
@@ -287,6 +289,13 @@ export const SettingsGeneral: Component = () => {
       .then((response) => readServerJson<ModelConfigPresetList>(response))
       .then((next) => {
         setModelConfigPresets(next)
+        void queryClient.invalidateQueries({ queryKey: ["config"] })
+        void queryClient.invalidateQueries({
+          predicate: (query) => {
+            const key = query.queryKey
+            return key[1] === "providers" || key[1] === "agents"
+          },
+        })
         showToast({
           variant: "success",
           icon: "circle-check",

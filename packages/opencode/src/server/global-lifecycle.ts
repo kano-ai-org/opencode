@@ -16,19 +16,25 @@ export const emitGlobalDisposed = Effect.sync(() =>
   }),
 )
 
+export const disposeAllInstances = Effect.fn("Server.disposeAllInstances")(function* (options?: { swallowErrors?: boolean }) {
+  const store = yield* InstanceStore.Service
+  yield* Effect.gen(function* () {
+    yield* options?.swallowErrors
+      ? store.disposeAll().pipe(
+          Effect.catchCause((cause) =>
+            Effect.sync(() => {
+              log.warn("global disposal failed", { cause })
+            }),
+          ),
+        )
+      : store.disposeAll()
+  }).pipe(Effect.uninterruptible)
+})
+
 export const disposeAllInstancesAndEmitGlobalDisposed = Effect.fn("Server.disposeAllInstancesAndEmitGlobalDisposed")(
   function* (options?: { swallowErrors?: boolean }) {
-    const store = yield* InstanceStore.Service
     yield* Effect.gen(function* () {
-      yield* options?.swallowErrors
-        ? store.disposeAll().pipe(
-            Effect.catchCause((cause) =>
-              Effect.sync(() => {
-                log.warn("global disposal failed", { cause })
-              }),
-            ),
-          )
-        : store.disposeAll()
+      yield* disposeAllInstances(options)
       yield* emitGlobalDisposed
     }).pipe(Effect.uninterruptible)
   },

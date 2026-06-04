@@ -71,6 +71,8 @@ const KNOWN_KEYS = new Set([
 // Post-parse normalisation:
 //  - Promote any unknown-but-present keys into `options` so they survive the
 //    round-trip in a well-known field.
+//  - Treat legacy `reasoningEffort` agent config as the matching model variant
+//    when no explicit `variant` is set; keep it in `options` for providers.
 //  - Translate the deprecated `tools: { name: boolean }` map into the new
 //    `permission` shape (write-adjacent tools collapse into `permission.edit`).
 //  - Coalesce `steps ?? maxSteps` so downstream can ignore the deprecated alias.
@@ -92,7 +94,15 @@ const normalize = (agent: Schema.Schema.Type<typeof AgentSchema>): Schema.Schema
   globalThis.Object.assign(permission, agent.permission)
 
   const steps = agent.steps ?? agent.maxSteps
-  return { ...agent, options, permission, ...(steps !== undefined ? { steps } : {}) }
+  const legacyReasoningEffort = (agent as { reasoningEffort?: unknown }).reasoningEffort
+  const variant = agent.variant ?? (typeof legacyReasoningEffort === "string" ? legacyReasoningEffort : undefined)
+  return {
+    ...agent,
+    ...(variant !== undefined ? { variant } : {}),
+    options,
+    permission,
+    ...(steps !== undefined ? { steps } : {}),
+  }
 }
 
 export const Info = AgentSchema.pipe(

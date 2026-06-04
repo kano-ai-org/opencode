@@ -4,7 +4,7 @@ import { GlobalBus, type GlobalEvent as GlobalBusEvent } from "@/bus/global"
 import { EffectBridge } from "@/effect/bridge"
 import { Bus } from "@/bus"
 import { Installation } from "@/installation"
-import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
+import { disposeAllInstances, disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import * as Log from "@opencode-ai/core/util/log"
 import { Effect, Queue, Schema } from "effect"
@@ -102,7 +102,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
         Effect.mapError(() => new HttpApiError.BadRequest({})),
       )
       yield* config.invalidate()
-      bridge.fork(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
+      bridge.fork(disposeAllInstances({ swallowErrors: true }))
       return result
     })
 

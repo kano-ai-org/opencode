@@ -1,6 +1,8 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import type { Model } from "@opencode-ai/sdk/v2"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import type { Model as ProviderModel } from "@/provider/provider"
+import { ProviderTransform } from "@/provider/transform"
 import { iife } from "@/util/iife"
 import * as Log from "@opencode-ai/core/util/log"
 import { setTimeout as sleep } from "node:timers/promises"
@@ -44,13 +46,17 @@ function imgMsg(msg: any): boolean {
 }
 
 function fix(model: Model, url: string): Model {
-  return {
+  const fixed = {
     ...model,
     api: {
       ...model.api,
       url,
       npm: "@ai-sdk/github-copilot",
     },
+  }
+  return {
+    ...fixed,
+    variants: ProviderTransform.variants(fixed as ProviderModel),
   }
 }
 
