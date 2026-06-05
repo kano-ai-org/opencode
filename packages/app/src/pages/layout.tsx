@@ -557,6 +557,17 @@ export default function Layout(props: ParentProps) {
     return projects.find((p) => p.worktree === root)
   })
 
+  createEffect(() => {
+    if (!pageReady()) return
+    if (!layoutReady()) return
+
+    const directory = currentDir()
+    if (!directory) return
+    if (currentProject()) return
+
+    layout.projects.open(directory)
+  })
+
   const [autoselecting] = createResource(async () => {
     await ready.promise
     await layout.ready.promise
