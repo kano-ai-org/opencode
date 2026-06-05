@@ -360,6 +360,7 @@ export const SessionRoutes = lazy(() =>
         "json",
         z.object({
           title: z.string().optional(),
+          metadata: z.record(z.string(), z.unknown()).nullable().optional(),
           time: z
             .object({
               archived: z.number().optional(),
@@ -373,6 +374,9 @@ export const SessionRoutes = lazy(() =>
 
         if (updates.title !== undefined) {
           await Session.setTitle({ sessionID, title: updates.title })
+        }
+        if (updates.metadata !== undefined) {
+          await Session.setMetadata({ sessionID, metadata: updates.metadata })
         }
         if (updates.time?.archived !== undefined) {
           await Session.setArchived({ sessionID, time: updates.time.archived })

@@ -83,6 +83,7 @@ export namespace Session {
       share,
       revert,
       permission: row.permission ?? undefined,
+      metadata: row.metadata ?? undefined,
       time: {
         created: row.time_created,
         updated: row.time_updated,
@@ -117,6 +118,7 @@ export namespace Session {
           }
         : null,
       permission: info.permission,
+      metadata: info.metadata,
       time_created: info.time.created,
       time_updated: info.time.updated,
       time_compacting: info.time.compacting,
@@ -164,6 +166,7 @@ export namespace Session {
         archived: z.number().optional(),
       }),
       permission: PermissionNext.Ruleset.optional(),
+      metadata: z.record(z.string(), z.unknown()).optional(),
       revert: z
         .object({
           messageID: z.string(),
@@ -452,6 +455,27 @@ export namespace Session {
         const row = db
           .update(SessionTable)
           .set({ permission: input.permission, time_updated: Date.now() })
+          .where(eq(SessionTable.id, SessionID.make(input.sessionID)))
+          .returning()
+          .get()
+        if (!row) throw new NotFoundError({ message: `Session not found: ${input.sessionID}` })
+        const info = fromRow(row)
+        Database.effect(() => Bus.publish(Event.Updated, { info }))
+        return info
+      })
+    },
+  )
+
+  export const setMetadata = fn(
+    z.object({
+      sessionID: Identifier.schema("session"),
+      metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+    }),
+    async (input) => {
+      return Database.use((db) => {
+        const row = db
+          .update(SessionTable)
+          .set({ metadata: input.metadata ?? null, time_updated: Date.now() })
           .where(eq(SessionTable.id, SessionID.make(input.sessionID)))
           .returning()
           .get()

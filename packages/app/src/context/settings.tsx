@@ -55,7 +55,7 @@ export interface Settings {
 export const monoDefault = "System Mono"
 export const sansDefault = "System Sans"
 export const terminalDefault = "JetBrainsMono Nerd Font Mono"
-export const newLayoutDesignsDefault = import.meta.env.VITE_OPENCODE_CHANNEL !== "prod"
+export const newLayoutDesignsDefault = false
 
 const monoFallback =
   'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
@@ -121,6 +121,7 @@ const defaultSettings: Settings = {
     editToolPartsExpanded: false,
     showSessionProgressBar: true,
     showCustomAgents: true,
+    newLayoutDesigns: false,
   },
   updates: {
     startup: true,
@@ -174,6 +175,11 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     createEffect(() => {
       if (store.general?.showCustomAgents === true) return
       setStore("general", "showCustomAgents", true)
+    })
+
+    createEffect(() => {
+      if (store.general?.newLayoutDesigns !== undefined) return
+      setStore("general", "newLayoutDesigns", false)
     })
 
     return {
