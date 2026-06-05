@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test"
 import {
   backgroundTaskActivityLabel,
   countBackgroundTasks,
+  deriveFallbackBackgroundTasks,
   formatBackgroundTaskElapsed,
   formatBackgroundTaskModel,
   formatBackgroundTaskRetry,
+  mergeBackgroundTaskSnapshots,
   readBackgroundTasksMetadata,
   resolveRootSession,
   shouldShowBackgroundTaskDock,
@@ -115,5 +117,75 @@ describe("background task metadata parser", () => {
       "bg_pending",
       "bg_done",
     ])
+  })
+
+  test("derives active fallback tasks from loaded session tree", () => {
+    const tasks = deriveFallbackBackgroundTasks({
+      rootSessionId: "ses_root",
+      sessions: [
+        {
+          id: "ses_root",
+          title: "Root session",
+          time: { created: 10, updated: 20 },
+        },
+        {
+          id: "ses_child_busy",
+          parentID: "ses_root",
+          title: "Research Meshy API (@librarian subagent)",
+          time: { created: Date.parse("2026-06-05T00:00:00.000Z"), updated: Date.parse("2026-06-05T00:00:20.000Z") },
+        },
+        {
+          id: "ses_child_retry",
+          parentID: "ses_root",
+          title: "Map blockers (@explore subagent)",
+          time: { created: Date.parse("2026-06-05T00:00:10.000Z"), updated: Date.parse("2026-06-05T00:00:30.000Z") },
+        },
+        {
+          id: "ses_idle",
+          parentID: "ses_root",
+          title: "Idle child",
+          time: { created: 10, updated: 20 },
+        },
+      ] as any,
+      statuses: {
+        ses_child_busy: { type: "busy" },
+        ses_child_retry: { type: "retry", attempt: 3, message: "waiting for retry", next: Date.now() + 1000 },
+        ses_idle: { type: "idle" },
+      },
+      messages: {
+        ses_child_busy: [
+          {
+            role: "user",
+            model: { providerID: "openai", modelID: "gpt-5", variant: "high" },
+          },
+        ] as any,
+      },
+      now: Date.parse("2026-06-05T00:00:40.000Z"),
+    })
+
+    expect(tasks.map((item) => item.sessionId)).toEqual(["ses_child_busy", "ses_child_retry"])
+    expect(tasks[0]).toMatchObject({
+      description: "Research Meshy API",
+      agent: "librarian",
+      model: { providerID: "openai", modelID: "gpt-5", variant: "high" },
+    })
+    expect(tasks[1]).toMatchObject({
+      description: "Map blockers",
+      agent: "explore",
+      retryCount: 2,
+      progress: { lastMessage: "waiting for retry" },
+    })
+  })
+
+  test("prefers metadata task rows over fallback duplicates", () => {
+    const merged = mergeBackgroundTaskSnapshots(
+      [task({ id: "bg_meta", sessionId: "ses_child" })],
+      [
+        task({ id: "session:ses_child", sessionId: "ses_child" }),
+        task({ id: "session:ses_other", sessionId: "ses_other" }),
+      ],
+    )
+
+    expect(merged.map((item) => item.id)).toEqual(["bg_meta", "session:ses_other"])
   })
 })

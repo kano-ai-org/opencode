@@ -1,3 +1,5 @@
+import type { Message, Session, SessionStatus } from "@opencode-ai/sdk/v2/client"
+
 export const BACKGROUND_TASK_METADATA_NAMESPACE = "ohMyOpenAgent"
 export const BACKGROUND_TASK_METADATA_KEY = "backgroundTasks"
 export const BACKGROUND_TASK_COMPLETED_RETENTION_MS = 5_000
@@ -52,6 +54,10 @@ export type BackgroundTaskCounts = {
   cancelled: number
   interrupt: number
 }
+
+type SessionLike = Pick<Session, "id" | "parentID" | "title" | "time">
+type MessageLike = Pick<Message, "role" | "model" | "providerID" | "modelID" | "variant">
+type SessionStatusMap = Record<string, SessionStatus | undefined>
 
 const statuses = new Set<BackgroundTaskStatus>(["pending", "running", "completed", "error", "cancelled", "interrupt"])
 const activeStatuses = new Set<BackgroundTaskStatus>(["pending", "running"])
@@ -168,6 +174,134 @@ function readTask(value: unknown): BackgroundTaskSnapshot | undefined {
     attempts,
     ...(readString(value, "error") ? { error: readString(value, "error") } : {}),
   }
+}
+
+function isActiveSessionStatus(status: SessionStatus | undefined): boolean {
+  return !!status && status.type !== "idle"
+}
+
+function parseSubagentSessionTitle(title: string): { description: string; agent: string } {
+  const match = title.match(/^(.*)\s+\(@(.+?) subagent\)$/)
+  if (!match) {
+    return {
+      description: title,
+      agent: "subagent",
+    }
+  }
+  return {
+    description: match[1]?.trim() || title,
+    agent: match[2] || "subagent",
+  }
+}
+
+function modelFromMessages(messages: MessageLike[] | undefined): BackgroundTaskSnapshot["model"] | undefined {
+  if (!messages?.length) return undefined
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.model?.providerID && message.model?.modelID) {
+      return {
+        providerID: message.model.providerID,
+        modelID: message.model.modelID,
+        ...(message.model.variant ? { variant: message.model.variant } : {}),
+      }
+    }
+    if (message.providerID && message.modelID) {
+      return {
+        providerID: message.providerID,
+        modelID: message.modelID,
+        ...(message.variant ? { variant: message.variant } : {}),
+      }
+    }
+  }
+  return undefined
+}
+
+function isDescendantOfRoot(session: SessionLike, rootSessionId: string, sessions: Map<string, SessionLike>): boolean {
+  let current: SessionLike | undefined = session
+  const visited = new Set<string>()
+  for (let depth = 0; current?.parentID && depth < 32; depth += 1) {
+    if (current.parentID === rootSessionId) return true
+    if (visited.has(current.id)) return false
+    visited.add(current.id)
+    current = sessions.get(current.parentID)
+  }
+  return false
+}
+
+export function mergeBackgroundTaskSnapshots(
+  metadataTasks: BackgroundTaskSnapshot[],
+  fallbackTasks: BackgroundTaskSnapshot[],
+): BackgroundTaskSnapshot[] {
+  if (metadataTasks.length === 0) return fallbackTasks
+  if (fallbackTasks.length === 0) return metadataTasks
+
+  const sessionIDs = new Set(metadataTasks.map((task) => task.sessionId).filter((value): value is string => !!value))
+  const taskIDs = new Set(metadataTasks.map((task) => task.id))
+
+  return [
+    ...metadataTasks,
+    ...fallbackTasks.filter((task) => !taskIDs.has(task.id) && (!task.sessionId || !sessionIDs.has(task.sessionId))),
+  ]
+}
+
+export function deriveFallbackBackgroundTasks(input: {
+  rootSessionId: string | undefined
+  sessions: SessionLike[]
+  statuses: SessionStatusMap
+  messages?: Record<string, MessageLike[] | undefined>
+  now?: number
+}): BackgroundTaskSnapshot[] {
+  if (!input.rootSessionId) return []
+
+  const now = input.now ?? Date.now()
+  const sessions = new Map(input.sessions.map((session) => [session.id, session] as const))
+
+  return input.sessions
+    .filter((session) => {
+      if (!session.parentID) return false
+      if (!isActiveSessionStatus(input.statuses[session.id])) return false
+      return isDescendantOfRoot(session, input.rootSessionId!, sessions)
+    })
+    .map((session) => {
+      const parsed = parseSubagentSessionTitle(session.title)
+      const status = input.statuses[session.id]
+      const model = modelFromMessages(input.messages?.[session.id])
+      const startedAt = new Date(session.time.created).toISOString()
+      const retryCount = status?.type === "retry" ? Math.max(0, status.attempt - 1) : 0
+      return {
+        id: `session:${session.id}`,
+        sessionId: session.id,
+        parentSessionId: session.parentID!,
+        rootSessionId: input.rootSessionId!,
+        parentMessageId: `session:${session.parentID}`,
+        description: parsed.description,
+        agent: parsed.agent,
+        status: "running",
+        ...(model ? { model } : {}),
+        queuedAt: startedAt,
+        startedAt,
+        elapsedMs: Math.max(0, now - session.time.created),
+        retryCount,
+        ...(status?.type === "retry"
+          ? {
+              progress: {
+                toolCalls: 0,
+                lastMessage: status.message,
+              },
+            }
+          : {}),
+        attempts: [
+          {
+            attemptId: `attempt:${session.id}`,
+            attemptNumber: Math.max(1, retryCount + 1),
+            sessionId: session.id,
+            ...(model ? model : {}),
+            status: "running",
+            startedAt,
+          },
+        ],
+      }
+    })
 }
 
 export function readBackgroundTasksMetadata(metadata: unknown): BackgroundTasksMetadataV1 | undefined {

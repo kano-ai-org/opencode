@@ -7,10 +7,12 @@ import { useSessionKey } from "@/pages/session/session-layout"
 import {
   backgroundTaskActivityLabel,
   countBackgroundTasks,
+  deriveFallbackBackgroundTasks,
   formatBackgroundTaskElapsed,
   formatBackgroundTaskModel,
   formatBackgroundTaskRetry,
   isActiveBackgroundTask,
+  mergeBackgroundTaskSnapshots,
   readBackgroundTasksMetadata,
   resolveRootSession,
   shouldShowBackgroundTaskDock,
@@ -58,16 +60,29 @@ export function SessionBackgroundTaskDock() {
   const navigate = useNavigate()
   const [expanded, setExpanded] = createSignal(false)
   const [now, setNow] = createSignal(Date.now())
+  const requestedFallbackSessions = new Set<string>()
 
   const rootSession = createMemo(() =>
     resolveRootSession(route.params.id, (sessionID) => sync.session.get(sessionID)),
   )
   const metadata = createMemo(() => readBackgroundTasksMetadata(rootSession()?.metadata))
-  const visible = createMemo(() => shouldShowBackgroundTaskDock(metadata(), now()))
-  const tasks = createMemo(() => metadata()?.tasks ?? [])
+  const metadataVisible = createMemo(() => shouldShowBackgroundTaskDock(metadata(), now()))
+  const fallbackTasks = createMemo(() =>
+    deriveFallbackBackgroundTasks({
+      rootSessionId: rootSession()?.id,
+      sessions: sync.data.session,
+      statuses: sync.data.session_status,
+      messages: sync.data.message,
+      now: now(),
+    }),
+  )
+  const tasks = createMemo(() =>
+    mergeBackgroundTaskSnapshots(metadataVisible() ? metadata()?.tasks ?? [] : [], fallbackTasks()),
+  )
+  const visible = createMemo(() => metadataVisible() || fallbackTasks().length > 0)
   const compact = createMemo(() => tasks().length > 3 && !expanded())
   const rows = createMemo(() => taskRows(tasks(), expanded()))
-  const batchKey = createMemo(() => `${metadata()?.rootSessionId ?? ""}:${tasks().map((task) => task.id).join(",")}`)
+  const batchKey = createMemo(() => `${rootSession()?.id ?? ""}:${tasks().map((task) => task.id).join(",")}`)
 
   createEffect(() => {
     batchKey()
@@ -78,6 +93,17 @@ export function SessionBackgroundTaskDock() {
     if (!visible()) return
     const timer = window.setInterval(() => setNow(Date.now()), 1_000)
     onCleanup(() => window.clearInterval(timer))
+  })
+
+  createEffect(() => {
+    for (const task of fallbackTasks()) {
+      const sessionID = task.sessionId
+      if (!sessionID) continue
+      if (sync.data.message[sessionID]?.length) continue
+      if (requestedFallbackSessions.has(sessionID)) continue
+      requestedFallbackSessions.add(sessionID)
+      void sync.session.sync(sessionID).catch(() => undefined)
+    }
   })
 
   const openTaskSession = (task: BackgroundTaskSnapshot) => {
