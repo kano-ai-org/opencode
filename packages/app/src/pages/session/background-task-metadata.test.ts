@@ -3,6 +3,7 @@ import {
   backgroundTaskActivityLabel,
   countBackgroundTasks,
   deriveFallbackBackgroundTasks,
+  deriveMessageFallbackBackgroundTasks,
   formatBackgroundTaskElapsed,
   formatBackgroundTaskModel,
   formatBackgroundTaskRetry,
@@ -187,5 +188,254 @@ describe("background task metadata parser", () => {
     )
 
     expect(merged.map((item) => item.id)).toEqual(["bg_meta", "session:ses_other"])
+  })
+
+  test("derives current-turn tasks from tool parts when session status is idle", () => {
+    const tasks = deriveMessageFallbackBackgroundTasks({
+      rootSessionId: "ses_root",
+      sessions: [
+        {
+          id: "ses_root",
+          title: "Root session",
+          time: { created: Date.parse("2026-06-06T00:00:00.000Z"), updated: Date.parse("2026-06-06T00:05:00.000Z") },
+        },
+      ] as any,
+      statuses: {},
+      messages: {
+        ses_root: [
+          {
+            id: "msg_old_user",
+            role: "user",
+            time: { created: Date.parse("2026-06-06T00:00:05.000Z") },
+          },
+          {
+            id: "msg_old_assistant",
+            role: "assistant",
+            parentID: "msg_old_user",
+            time: {
+              created: Date.parse("2026-06-06T00:00:10.000Z"),
+              completed: Date.parse("2026-06-06T00:00:40.000Z"),
+            },
+          },
+          {
+            id: "msg_user",
+            role: "user",
+            time: { created: Date.parse("2026-06-06T00:01:00.000Z") },
+          },
+          {
+            id: "msg_assistant",
+            role: "assistant",
+            parentID: "msg_user",
+            time: { created: Date.parse("2026-06-06T00:01:05.000Z") },
+          },
+        ] as any,
+      },
+      parts: {
+        msg_old_assistant: [
+          {
+            id: "prt_old",
+            type: "tool",
+            tool: "task",
+            state: {
+              status: "completed",
+              input: { description: "Old batch task", subagent_type: "oracle" },
+              output: "Background task launched.\nBackground Task ID: bg_old\nSession ID: ses_old\nDescription: Old batch task\nAgent: oracle\nStatus: pending",
+            },
+          },
+        ] as any,
+        msg_assistant: [
+          {
+            id: "prt_review",
+            type: "tool",
+            tool: "task",
+            state: {
+              status: "completed",
+              input: { description: "Wire T4 workflow", category: "unspecified-high" },
+              output:
+                "Task completed in 13m 31s.\n\nAgent: Sisyphus-Junior (category: unspecified-high)\nModel: openai/gpt-5.5\n\nReview agents are running in the background.\n\n<task_metadata>\nsession_id: ses_child\ntask_id: ses_child\nsubagent: Sisyphus-Junior\ncategory: unspecified-high\n</task_metadata>",
+              metadata: {
+                sessionId: "ses_child",
+                taskId: "ses_child",
+                description: "Wire T4 workflow",
+                agent: "Sisyphus-Junior",
+                category: "unspecified-high",
+                model: { providerID: "openai", modelID: "gpt-5.5" },
+              },
+            },
+          },
+          {
+            id: "prt_running",
+            type: "tool",
+            tool: "task",
+            state: {
+              status: "running",
+              input: { description: "Plan blocker fixes", subagent_type: "plan" },
+            },
+          },
+        ] as any,
+      },
+      now: Date.parse("2026-06-06T00:05:30.000Z"),
+    })
+
+    expect(tasks.map((item) => item.description)).toEqual(["Wire T4 workflow", "Plan blocker fixes"])
+    expect(tasks[0]).toMatchObject({
+      sessionId: "ses_child",
+      agent: "Sisyphus-Junior",
+      status: "running",
+      model: { providerID: "openai", modelID: "gpt-5.5" },
+    })
+    expect(tasks[1]).toMatchObject({
+      agent: "plan",
+      status: "running",
+    })
+  })
+
+  test("derives nested background launches from loaded child session messages", () => {
+    const tasks = deriveMessageFallbackBackgroundTasks({
+      rootSessionId: "ses_root",
+      sessions: [
+        {
+          id: "ses_root",
+          title: "Root session",
+          time: { created: Date.parse("2026-06-06T00:00:00.000Z"), updated: Date.parse("2026-06-06T00:05:00.000Z") },
+        },
+        {
+          id: "ses_child",
+          parentID: "ses_root",
+          title: "Wire T4 workflow (@Sisyphus-Junior subagent)",
+          time: { created: Date.parse("2026-06-06T00:01:10.000Z"), updated: Date.parse("2026-06-06T00:05:10.000Z") },
+        },
+      ] as any,
+      statuses: {},
+      messages: {
+        ses_root: [
+          {
+            id: "msg_root_user",
+            role: "user",
+            time: { created: Date.parse("2026-06-06T00:01:00.000Z") },
+          },
+          {
+            id: "msg_root_assistant",
+            role: "assistant",
+            parentID: "msg_root_user",
+            time: { created: Date.parse("2026-06-06T00:01:05.000Z") },
+          },
+        ] as any,
+        ses_child: [
+          {
+            id: "msg_child_user",
+            role: "user",
+            time: { created: Date.parse("2026-06-06T00:01:15.000Z") },
+          },
+          {
+            id: "msg_child_assistant",
+            role: "assistant",
+            parentID: "msg_child_user",
+            time: {
+              created: Date.parse("2026-06-06T00:01:20.000Z"),
+              completed: Date.parse("2026-06-06T00:01:40.000Z"),
+            },
+          },
+        ] as any,
+      },
+      parts: {
+        msg_root_assistant: [
+          {
+            id: "prt_root_task",
+            type: "tool",
+            tool: "task",
+            state: {
+              status: "completed",
+              input: { description: "Wire T4 workflow", category: "unspecified-high" },
+              output:
+                "Task completed.\nReview agents are running in the background.\n<task_metadata>\nsession_id: ses_child\ntask_id: ses_child\nsubagent: Sisyphus-Junior\ncategory: unspecified-high\n</task_metadata>",
+              metadata: {
+                sessionId: "ses_child",
+                taskId: "ses_child",
+                description: "Wire T4 workflow",
+                agent: "Sisyphus-Junior",
+                category: "unspecified-high",
+              },
+            },
+          },
+        ] as any,
+        msg_child_assistant: [
+          {
+            id: "prt_nested_launch",
+            type: "tool",
+            tool: "call_omo_agent",
+            state: {
+              status: "completed",
+              input: { description: "Explore T4 blockers" },
+              output:
+                "Background agent task launched successfully.\nTask ID: bg_nested\nSession ID: ses_nested\nDescription: Explore T4 blockers\nAgent: explore (subagent)\nStatus: pending",
+            },
+          },
+        ] as any,
+      },
+      now: Date.parse("2026-06-06T00:05:30.000Z"),
+    })
+
+    expect(tasks.map((item) => item.description)).toEqual(["Explore T4 blockers"])
+    expect(tasks[0]).toMatchObject({
+      id: "bg_nested",
+      sessionId: "ses_nested",
+      agent: "explore",
+      status: "pending",
+    })
+  })
+
+  test("hides stale completed message-derived batches after retention", () => {
+    const tasks = deriveMessageFallbackBackgroundTasks({
+      rootSessionId: "ses_root",
+      sessions: [
+        {
+          id: "ses_root",
+          title: "Root session",
+          time: { created: Date.parse("2026-06-06T00:00:00.000Z"), updated: Date.parse("2026-06-06T00:06:00.000Z") },
+        },
+      ] as any,
+      statuses: {},
+      messages: {
+        ses_root: [
+          {
+            id: "msg_user",
+            role: "user",
+            time: { created: Date.parse("2026-06-06T00:01:00.000Z") },
+          },
+          {
+            id: "msg_assistant",
+            role: "assistant",
+            parentID: "msg_user",
+            time: {
+              created: Date.parse("2026-06-06T00:01:05.000Z"),
+              completed: Date.parse("2026-06-06T00:01:20.000Z"),
+            },
+          },
+        ] as any,
+      },
+      parts: {
+        msg_assistant: [
+          {
+            id: "prt_done",
+            type: "tool",
+            tool: "task",
+            state: {
+              status: "completed",
+              input: { description: "Completed batch", subagent_type: "oracle" },
+              output:
+                "Background task launched.\nBackground Task ID: bg_done\nSession ID: ses_done\nDescription: Completed batch\nAgent: oracle\nStatus: completed",
+              time: {
+                start: Date.parse("2026-06-06T00:01:05.000Z"),
+                end: Date.parse("2026-06-06T00:01:20.000Z"),
+              },
+            },
+          },
+        ] as any,
+      },
+      now: Date.parse("2026-06-06T00:01:30.500Z"),
+    })
+
+    expect(tasks).toEqual([])
   })
 })

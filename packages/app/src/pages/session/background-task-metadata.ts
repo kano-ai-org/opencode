@@ -1,4 +1,4 @@
-import type { Message, Session, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { Message, Part, Session, SessionStatus } from "@opencode-ai/sdk/v2/client"
 
 export const BACKGROUND_TASK_METADATA_NAMESPACE = "ohMyOpenAgent"
 export const BACKGROUND_TASK_METADATA_KEY = "backgroundTasks"
@@ -55,9 +55,48 @@ export type BackgroundTaskCounts = {
   interrupt: number
 }
 
-type SessionLike = Pick<Session, "id" | "parentID" | "title" | "time">
-type MessageLike = Pick<Message, "role" | "model" | "providerID" | "modelID" | "variant">
+type SessionLike = {
+  id: Session["id"]
+  parentID?: Session["parentID"]
+  title: Session["title"]
+  time: {
+    created: number
+    updated: number
+    archived?: number
+  }
+}
+type MessageLike = {
+  id: Message["id"]
+  parentID?: string
+  role: Message["role"]
+  time: {
+    created: number
+    completed?: number
+  }
+  model?: {
+    providerID?: string
+    modelID?: string
+    variant?: string
+  }
+  providerID?: string
+  modelID?: string
+  variant?: string
+  error?: {
+    name?: string
+    data?: {
+      message?: string
+    }
+  }
+}
 type SessionStatusMap = Record<string, SessionStatus | undefined>
+type PartStore = Record<string, Part[] | undefined>
+type DerivedSessionState = {
+  status: BackgroundTaskStatus
+  completedAt?: string
+  error?: string
+  progress?: BackgroundTaskSnapshot["progress"]
+  retryCount?: number
+}
 
 const statuses = new Set<BackgroundTaskStatus>(["pending", "running", "completed", "error", "cancelled", "interrupt"])
 const activeStatuses = new Set<BackgroundTaskStatus>(["pending", "running"])
@@ -228,6 +267,375 @@ function isDescendantOfRoot(session: SessionLike, rootSessionId: string, session
   return false
 }
 
+function parseOutputMatch(output: string | undefined, pattern: RegExp): string | undefined {
+  if (!output) return undefined
+  const match = output.match(pattern)
+  const value = match?.[1]?.trim()
+  return value ? value : undefined
+}
+
+function normalizeAgentLabel(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  return value
+    .replace(/\s+\(category:.*$/i, "")
+    .replace(/\s+\(subagent\)$/i, "")
+    .trim()
+}
+
+function toolStateTimestamp(part: Part, key: "start" | "end"): number | undefined {
+  if (part.type !== "tool") return undefined
+  const time = "time" in part.state && isRecord(part.state.time)
+    ? part.state.time as Record<string, unknown>
+    : undefined
+  const value = time?.[key]
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+function toIso(timestamp: number | undefined): string | undefined {
+  return timestamp === undefined ? undefined : new Date(timestamp).toISOString()
+}
+
+function truncateMessage(value: string | undefined, limit = 180): string | undefined {
+  const text = value?.replace(/\s+/g, " ").trim()
+  if (!text) return undefined
+  if (text.length <= limit) return text
+  return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}...`
+}
+
+function parseModelSummary(value: string | undefined): BackgroundTaskSnapshot["model"] | undefined {
+  if (!value) return undefined
+  const match = value.trim().match(/^([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)(?::([A-Za-z0-9._-]+))?$/)
+  if (!match) return undefined
+  const providerID = match[1]
+  const modelID = match[2]
+  const variant = match[3]
+  if (!providerID || !modelID) return undefined
+  return {
+    providerID,
+    modelID,
+    ...(variant ? { variant } : {}),
+  }
+}
+
+function activeUserMessageId(messages: MessageLike[] | undefined, status: SessionStatus | undefined): string | undefined {
+  if (!messages?.length) return undefined
+
+  const pendingAssistant = [...messages].reverse().find(
+    (message) => message.role === "assistant" && typeof message.time.completed !== "number",
+  )
+  if (pendingAssistant?.parentID) return pendingAssistant.parentID
+
+  if (isActiveSessionStatus(status)) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index]
+      if (message?.role === "user") return message.id
+    }
+  }
+
+  return undefined
+}
+
+function userMessageIdsNewest(messages: MessageLike[] | undefined): string[] {
+  if (!messages?.length) return []
+  return messages
+    .filter((message) => message.role === "user")
+    .map((message) => message.id)
+    .reverse()
+}
+
+function backgroundTaskBatchCompletedAt(tasks: BackgroundTaskSnapshot[]): number | undefined {
+  let latest: number | undefined
+
+  for (const task of tasks) {
+    if (!terminalStatuses.has(task.status)) return undefined
+    const timestamp = Date.parse(task.completedAt ?? task.startedAt ?? task.queuedAt ?? "")
+    if (!Number.isFinite(timestamp)) continue
+    latest = latest === undefined ? timestamp : Math.max(latest, timestamp)
+  }
+
+  return latest
+}
+
+function shouldRetainFallbackTaskBatch(tasks: BackgroundTaskSnapshot[], now: number): boolean {
+  if (tasks.length === 0) return false
+  if (tasks.some((task) => isActiveBackgroundTask(task))) return true
+
+  const completedAt = backgroundTaskBatchCompletedAt(tasks)
+  if (completedAt === undefined) return false
+
+  return now - completedAt <= BACKGROUND_TASK_COMPLETED_RETENTION_MS
+}
+
+function deriveSessionProgress(input: {
+  sessionId: string
+  messages: Record<string, MessageLike[] | undefined>
+  parts: PartStore
+  statuses: SessionStatusMap
+}): BackgroundTaskSnapshot["progress"] | undefined {
+  const messages = input.messages[input.sessionId]
+  if (!messages?.length) return undefined
+
+  const userMessageId = activeUserMessageId(messages, input.statuses[input.sessionId]) ?? [...messages]
+    .reverse()
+    .find((message) => message.role === "user")?.id
+
+  const assistants = messages.filter(
+    (message) => message.role === "assistant" && (!userMessageId || message.parentID === userMessageId),
+  )
+  if (assistants.length === 0) return undefined
+
+  let toolCalls = 0
+  let lastTool: string | undefined
+  let lastMessage: string | undefined
+  let lastUpdate: string | undefined
+
+  for (const message of assistants) {
+    const parts = input.parts[message.id] ?? []
+    for (const part of parts) {
+      if (part.type === "tool") toolCalls += 1
+    }
+  }
+
+  for (let messageIndex = assistants.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = assistants[messageIndex]
+    const parts = input.parts[message.id] ?? []
+
+    for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = parts[partIndex]
+      if (!lastTool && part.type === "tool") {
+        lastTool = part.tool
+        lastUpdate = toIso(toolStateTimestamp(part, "end") ?? toolStateTimestamp(part, "start")) ?? lastUpdate
+      }
+
+      if (!lastMessage && (part.type === "text" || part.type === "reasoning")) {
+        lastMessage = truncateMessage(part.text)
+      }
+
+      if (lastTool && lastMessage) break
+    }
+
+    lastUpdate = lastUpdate ?? toIso(message.time.completed ?? message.time.created)
+    if (lastTool && lastMessage && lastUpdate) break
+  }
+
+  if (toolCalls === 0 && !lastTool && !lastMessage) return undefined
+
+  return {
+    toolCalls,
+    ...(lastTool ? { lastTool } : {}),
+    ...(lastMessage ? { lastMessage } : {}),
+    ...(lastUpdate ? { lastUpdate } : {}),
+  }
+}
+
+function deriveSessionState(input: {
+  sessionId: string
+  messages: Record<string, MessageLike[] | undefined>
+  parts: PartStore
+  statuses: SessionStatusMap
+}): DerivedSessionState | undefined {
+  const status = input.statuses[input.sessionId]
+  if (status?.type === "retry") {
+    return {
+      status: "running",
+      retryCount: Math.max(0, status.attempt - 1),
+      progress: {
+        toolCalls: 0,
+        ...(status.message ? { lastMessage: status.message } : {}),
+      },
+    }
+  }
+  if (isActiveSessionStatus(status)) {
+    return {
+      status: "running",
+      progress: deriveSessionProgress(input),
+    }
+  }
+
+  const messages = input.messages[input.sessionId]
+  if (!messages?.length) return undefined
+
+  const pendingAssistant = [...messages].reverse().find(
+    (message) => message.role === "assistant" && typeof message.time.completed !== "number",
+  )
+  if (pendingAssistant) {
+    return {
+      status: "running",
+      progress: deriveSessionProgress(input),
+    }
+  }
+
+  const assistantError = [...messages].reverse().find(
+    (message) => message.role === "assistant" && !!message.error?.name,
+  )
+  if (assistantError?.error) {
+    return {
+      status: "error",
+      completedAt: toIso(assistantError.time.completed ?? assistantError.time.created),
+      error: assistantError.error.data?.message ?? assistantError.error.name,
+      progress: deriveSessionProgress(input),
+    }
+  }
+
+  const lastMessage = messages[messages.length - 1]
+  return {
+    status: "completed",
+    completedAt: toIso(lastMessage?.time.completed ?? lastMessage?.time.created),
+    progress: deriveSessionProgress(input),
+  }
+}
+
+function parseToolOutputStatus(output: string | undefined): BackgroundTaskStatus | undefined {
+  const value = parseOutputMatch(output, /^Status:\s*([A-Za-z_]+)\s*$/im)?.toLowerCase()
+  if (!value) return undefined
+  if (value === "pending") return "pending"
+  if (value === "running" || value === "busy" || value === "in_progress") return "running"
+  if (value === "completed" || value === "succeeded" || value === "success") return "completed"
+  if (value === "failed" || value === "error") return "error"
+  if (value === "cancelled" || value === "canceled") return "cancelled"
+  if (value === "interrupt" || value === "interrupted") return "interrupt"
+}
+
+function parseToolBackgroundSnapshot(input: {
+  rootSessionId: string
+  parentSessionId: string
+  message: MessageLike
+  part: Part
+  messages: Record<string, MessageLike[] | undefined>
+  parts: PartStore
+  statuses: SessionStatusMap
+  sessions: Map<string, SessionLike>
+  now: number
+}): BackgroundTaskSnapshot | undefined {
+  const part = input.part
+  if (part.type !== "tool") return undefined
+  if (part.tool !== "task" && part.tool !== "call_omo_agent") return undefined
+
+  const metadata = "metadata" in part.state && isRecord(part.state.metadata) ? part.state.metadata : undefined
+  const toolInput = "input" in part.state && isRecord(part.state.input) ? part.state.input : undefined
+  const output = "output" in part.state && typeof part.state.output === "string" ? part.state.output : undefined
+
+  const sessionId = readString(metadata ?? {}, "sessionId")
+    ?? parseOutputMatch(output, /session_id:\s*(ses_[A-Za-z0-9]+)/i)
+    ?? parseOutputMatch(output, /Session ID:\s*(ses_[A-Za-z0-9]+)/i)
+  const backgroundTaskId = readString(metadata ?? {}, "backgroundTaskId")
+    ?? parseOutputMatch(output, /background_task_id:\s*(bg_[A-Za-z0-9]+)/i)
+    ?? parseOutputMatch(output, /Background Task ID:\s*(bg_[A-Za-z0-9]+)/i)
+    ?? parseOutputMatch(output, /Task ID:\s*(bg_[A-Za-z0-9]+)/i)
+  const metadataTaskId = readString(metadata ?? {}, "taskId")
+    ?? parseOutputMatch(output, /task_id:\s*((?:ses|bg)_[A-Za-z0-9]+)/i)
+  const description = readString(metadata ?? {}, "description")
+    ?? readString(toolInput ?? {}, "description")
+    ?? parseOutputMatch(output, /^Description:\s*(.+)$/im)
+    ?? (part.tool === "call_omo_agent" ? "Background agent" : "Background task")
+  const agent = normalizeAgentLabel(
+    readString(metadata ?? {}, "agent")
+      ?? parseOutputMatch(output, /^Agent:\s*(.+)$/im)
+      ?? readString(toolInput ?? {}, "subagent_type")
+      ?? readString(toolInput ?? {}, "requested_subagent_type"),
+  ) ?? "subagent"
+  const category = readString(metadata ?? {}, "category")
+    ?? readString(toolInput ?? {}, "category")
+    ?? readString(toolInput ?? {}, "subagent_type")
+  const model = readModel(metadata?.model)
+    ?? parseModelSummary(parseOutputMatch(output, /^Model:\s*(.+)$/im))
+    ?? modelFromMessages(sessionId ? input.messages[sessionId] : undefined)
+
+  const launchedInBackground = !!output
+    && /Background (?:agent )?task launched/i.test(output)
+  const reviewRunning = !!output
+    && /Review agents are running in the background/i.test(output)
+  const childState = sessionId
+    ? deriveSessionState({
+        sessionId,
+        messages: input.messages,
+        parts: input.parts,
+        statuses: input.statuses,
+      })
+    : undefined
+
+  let status: BackgroundTaskStatus | undefined
+  if (part.state.status === "running") status = "running"
+  else if (part.state.status === "error") status = "error"
+  else if (childState?.status) status = childState.status
+  else if (reviewRunning) status = "running"
+  else if (launchedInBackground) status = parseToolOutputStatus(output) ?? "pending"
+  else status = parseToolOutputStatus(output)
+
+  if (!status) return undefined
+
+  const sessionInfo = sessionId ? input.sessions.get(sessionId) : undefined
+  const startedAtMs = sessionInfo?.time.created
+    ?? toolStateTimestamp(part, "start")
+    ?? input.message.time.created
+  const completedAt = childState?.completedAt
+    ?? (status === "completed" || status === "error" || status === "cancelled" || status === "interrupt"
+      ? toIso(toolStateTimestamp(part, "end") ?? input.message.time.completed)
+      : undefined)
+  const retryCount = childState?.retryCount ?? 0
+  const progress = childState?.progress
+    ?? (launchedInBackground || reviewRunning
+      ? {
+          toolCalls: 0,
+          ...(launchedInBackground ? { lastMessage: "launched" } : {}),
+        }
+      : undefined)
+
+  return {
+    id: backgroundTaskId ?? metadataTaskId ?? sessionId ?? `part:${input.message.id}:${part.id}`,
+    ...(sessionId ? { sessionId } : {}),
+    parentSessionId: input.parentSessionId,
+    rootSessionId: input.rootSessionId,
+    parentMessageId: input.message.id,
+    description,
+    agent,
+    ...(category ? { category } : {}),
+    status,
+    ...(model ? { model } : {}),
+    ...(toIso(startedAtMs) ? { queuedAt: toIso(startedAtMs) } : {}),
+    ...(toIso(startedAtMs) ? { startedAt: toIso(startedAtMs) } : {}),
+    ...(completedAt ? { completedAt } : {}),
+    elapsedMs: Math.max(0, input.now - startedAtMs),
+    retryCount,
+    ...(progress ? { progress } : {}),
+    attempts: [],
+    ...(childState?.error ? { error: childState.error } : {}),
+  }
+}
+
+function deriveMessageTasksForUserMessage(input: {
+  session: SessionLike
+  userMessageId: string
+  rootSessionId: string
+  messages: Record<string, MessageLike[] | undefined>
+  parts: PartStore
+  statuses: SessionStatusMap
+  sessions: Map<string, SessionLike>
+  now: number
+}): BackgroundTaskSnapshot[] {
+  const sessionMessages = input.messages[input.session.id]
+  if (!sessionMessages?.length) return []
+
+  return sessionMessages
+    .filter((message) => message.role === "assistant" && message.parentID === input.userMessageId)
+    .flatMap((message) =>
+      (input.parts[message.id] ?? []).flatMap((part) => {
+        const task = parseToolBackgroundSnapshot({
+          rootSessionId: input.rootSessionId,
+          parentSessionId: input.session.id,
+          message,
+          part,
+          messages: input.messages,
+          parts: input.parts,
+          statuses: input.statuses,
+          sessions: input.sessions,
+          now: input.now,
+        })
+        return task ? [task] : []
+      }),
+    )
+}
+
 export function mergeBackgroundTaskSnapshots(
   metadataTasks: BackgroundTaskSnapshot[],
   fallbackTasks: BackgroundTaskSnapshot[],
@@ -301,6 +709,44 @@ export function deriveFallbackBackgroundTasks(input: {
           },
         ],
       }
+    })
+}
+
+export function deriveMessageFallbackBackgroundTasks(input: {
+  rootSessionId: string | undefined
+  sessions: SessionLike[]
+  statuses: SessionStatusMap
+  messages: Record<string, MessageLike[] | undefined>
+  parts: PartStore
+  now?: number
+}): BackgroundTaskSnapshot[] {
+  if (!input.rootSessionId) return []
+
+  const now = input.now ?? Date.now()
+  const sessions = new Map(input.sessions.map((session) => [session.id, session] as const))
+
+  return input.sessions
+    .filter((session) => session.id === input.rootSessionId || isDescendantOfRoot(session, input.rootSessionId!, sessions))
+    .flatMap((session) => {
+      const sessionMessages = input.messages[session.id]
+      if (!sessionMessages?.length) return []
+
+      for (const userMessageId of userMessageIdsNewest(sessionMessages)) {
+        const tasks = deriveMessageTasksForUserMessage({
+          session,
+          userMessageId,
+          rootSessionId: input.rootSessionId!,
+          messages: input.messages,
+          parts: input.parts,
+          statuses: input.statuses,
+          sessions,
+          now,
+        })
+        if (tasks.length === 0) continue
+        return shouldRetainFallbackTaskBatch(tasks, now) ? tasks : []
+      }
+
+      return []
     })
 }
 

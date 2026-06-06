@@ -8,6 +8,7 @@ import {
   backgroundTaskActivityLabel,
   countBackgroundTasks,
   deriveFallbackBackgroundTasks,
+  deriveMessageFallbackBackgroundTasks,
   formatBackgroundTaskElapsed,
   formatBackgroundTaskModel,
   formatBackgroundTaskRetry,
@@ -67,7 +68,7 @@ export function SessionBackgroundTaskDock() {
   )
   const metadata = createMemo(() => readBackgroundTasksMetadata(rootSession()?.metadata))
   const metadataVisible = createMemo(() => shouldShowBackgroundTaskDock(metadata(), now()))
-  const fallbackTasks = createMemo(() =>
+  const sessionStatusFallbackTasks = createMemo(() =>
     deriveFallbackBackgroundTasks({
       rootSessionId: rootSession()?.id,
       sessions: sync.data.session,
@@ -75,6 +76,19 @@ export function SessionBackgroundTaskDock() {
       messages: sync.data.message,
       now: now(),
     }),
+  )
+  const messageFallbackTasks = createMemo(() =>
+    deriveMessageFallbackBackgroundTasks({
+      rootSessionId: rootSession()?.id,
+      sessions: sync.data.session,
+      statuses: sync.data.session_status,
+      messages: sync.data.message,
+      parts: sync.data.part,
+      now: now(),
+    }),
+  )
+  const fallbackTasks = createMemo(() =>
+    mergeBackgroundTaskSnapshots(messageFallbackTasks(), sessionStatusFallbackTasks()),
   )
   const tasks = createMemo(() =>
     mergeBackgroundTaskSnapshots(metadataVisible() ? metadata()?.tasks ?? [] : [], fallbackTasks()),
