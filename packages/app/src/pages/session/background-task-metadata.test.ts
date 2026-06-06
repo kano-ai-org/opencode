@@ -190,6 +190,97 @@ describe("background task metadata parser", () => {
     expect(merged.map((item) => item.id)).toEqual(["bg_meta", "session:ses_other"])
   })
 
+  test("merges placeholder tool rows with the matching active child session", () => {
+    const merged = mergeBackgroundTaskSnapshots(
+      [
+        task({
+          id: "part:msg_parent:prt_tool",
+          sessionId: undefined,
+          description: "Implement T5 coverage",
+          agent: "subagent",
+          model: undefined,
+          category: "unspecified-high",
+          status: "running",
+          queuedAt: "2026-06-05T00:00:00.000Z",
+          startedAt: "2026-06-05T00:00:00.000Z",
+          elapsedMs: 45_000,
+          attempts: [],
+        }),
+      ],
+      [
+        task({
+          id: "session:ses_child",
+          sessionId: "ses_child",
+          description: "Implement T5 coverage",
+          agent: "Sisyphus-Junior",
+          model: { providerID: "openai", modelID: "gpt-5.5", variant: "max" },
+          queuedAt: "2026-06-05T00:00:01.000Z",
+          startedAt: "2026-06-05T00:00:01.000Z",
+          elapsedMs: 44_000,
+          attempts: [
+            {
+              attemptId: "attempt:ses_child",
+              attemptNumber: 1,
+              sessionId: "ses_child",
+              providerID: "openai",
+              modelID: "gpt-5.5",
+              variant: "max",
+              status: "running",
+              startedAt: "2026-06-05T00:00:01.000Z",
+            },
+          ],
+        }),
+      ],
+    )
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0]).toMatchObject({
+      id: "part:msg_parent:prt_tool",
+      sessionId: "ses_child",
+      description: "Implement T5 coverage",
+      agent: "Sisyphus-Junior",
+      status: "running",
+      model: { providerID: "openai", modelID: "gpt-5.5", variant: "max" },
+    })
+    expect(merged[0]?.attempts).toHaveLength(1)
+  })
+
+  test("keeps ambiguous placeholder rows when multiple child sessions match", () => {
+    const placeholder = task({
+      id: "part:msg_parent:prt_tool",
+      sessionId: undefined,
+      description: "Implement T5 coverage",
+      agent: "subagent",
+      model: undefined,
+      queuedAt: "2026-06-05T00:00:00.000Z",
+      startedAt: "2026-06-05T00:00:00.000Z",
+    })
+    const firstChild = task({
+      id: "session:ses_child_a",
+      sessionId: "ses_child_a",
+      description: "Implement T5 coverage",
+      agent: "Sisyphus-Junior",
+      queuedAt: "2026-06-05T00:00:01.000Z",
+      startedAt: "2026-06-05T00:00:01.000Z",
+    })
+    const secondChild = task({
+      id: "session:ses_child_b",
+      sessionId: "ses_child_b",
+      description: "Implement T5 coverage",
+      agent: "Sisyphus-Junior",
+      queuedAt: "2026-06-05T00:00:02.000Z",
+      startedAt: "2026-06-05T00:00:02.000Z",
+    })
+
+    const merged = mergeBackgroundTaskSnapshots([placeholder], [firstChild, secondChild])
+
+    expect(merged.map((item) => item.id)).toEqual([
+      "part:msg_parent:prt_tool",
+      "session:ses_child_a",
+      "session:ses_child_b",
+    ])
+  })
+
   test("derives current-turn tasks from tool parts when session status is idle", () => {
     const tasks = deriveMessageFallbackBackgroundTasks({
       rootSessionId: "ses_root",

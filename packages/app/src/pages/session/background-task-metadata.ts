@@ -101,6 +101,8 @@ type DerivedSessionState = {
 const statuses = new Set<BackgroundTaskStatus>(["pending", "running", "completed", "error", "cancelled", "interrupt"])
 const activeStatuses = new Set<BackgroundTaskStatus>(["pending", "running"])
 const terminalStatuses = new Set<BackgroundTaskStatus>(["completed", "error", "cancelled", "interrupt"])
+const duplicateTaskTimeWindowMs = 5 * 60 * 1000
+const genericAgentLabels = new Set(["agent", "background agent", "background task", "subagent", "task"])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -300,6 +302,90 @@ function truncateMessage(value: string | undefined, limit = 180): string | undef
   if (!text) return undefined
   if (text.length <= limit) return text
   return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}...`
+}
+
+function normalizedTaskText(value: string | undefined): string {
+  return value?.replace(/\s+/g, " ").trim().toLowerCase() ?? ""
+}
+
+function isGenericAgentLabel(value: string | undefined): boolean {
+  const normalized = normalizedTaskText(value)
+  return !normalized || genericAgentLabels.has(normalized)
+}
+
+function areAgentLabelsCompatible(left: BackgroundTaskSnapshot, right: BackgroundTaskSnapshot): boolean {
+  const leftAgent = normalizedTaskText(left.agent)
+  const rightAgent = normalizedTaskText(right.agent)
+  return leftAgent === rightAgent || isGenericAgentLabel(left.agent) || isGenericAgentLabel(right.agent)
+}
+
+function taskComparisonTime(task: BackgroundTaskSnapshot): number | undefined {
+  for (const value of [task.startedAt, task.queuedAt, task.completedAt]) {
+    const timestamp = Date.parse(value ?? "")
+    if (Number.isFinite(timestamp)) return timestamp
+  }
+  return undefined
+}
+
+function hasCompatibleTaskTime(left: BackgroundTaskSnapshot, right: BackgroundTaskSnapshot): boolean {
+  const leftTime = taskComparisonTime(left)
+  const rightTime = taskComparisonTime(right)
+  if (leftTime === undefined || rightTime === undefined) return true
+  return Math.abs(leftTime - rightTime) <= duplicateTaskTimeWindowMs
+}
+
+function isPlaceholderTask(task: BackgroundTaskSnapshot): boolean {
+  return !task.sessionId || !task.model || isGenericAgentLabel(task.agent)
+}
+
+function areCompatibleBackgroundTasks(left: BackgroundTaskSnapshot, right: BackgroundTaskSnapshot): boolean {
+  if (left.id === right.id) return true
+  if (left.sessionId && right.sessionId) return left.sessionId === right.sessionId
+  if (!isPlaceholderTask(left) && !isPlaceholderTask(right)) return false
+  if (!left.sessionId && !right.sessionId) return false
+  if (left.rootSessionId !== right.rootSessionId) return false
+  if (normalizedTaskText(left.description) !== normalizedTaskText(right.description)) return false
+  if (!areAgentLabelsCompatible(left, right)) return false
+  return hasCompatibleTaskTime(left, right)
+}
+
+function mergeAttempts(
+  left: BackgroundTaskSnapshot["attempts"],
+  right: BackgroundTaskSnapshot["attempts"],
+): BackgroundTaskSnapshot["attempts"] {
+  const attempts = new Map<string, BackgroundTaskSnapshot["attempts"][number]>()
+  for (const attempt of [...left, ...right]) {
+    attempts.set(attempt.attemptId, { ...attempts.get(attempt.attemptId), ...attempt })
+  }
+  return [...attempts.values()]
+}
+
+function mergeBackgroundTaskSnapshot(
+  primary: BackgroundTaskSnapshot,
+  secondary: BackgroundTaskSnapshot,
+): BackgroundTaskSnapshot {
+  const primaryAgentIsGeneric = isGenericAgentLabel(primary.agent)
+  const primaryStatus = primary.status
+  const secondaryStatus = secondary.status
+  const status = primaryStatus === "pending" && secondaryStatus === "running" ? "running" : primaryStatus
+
+  return {
+    ...secondary,
+    ...primary,
+    sessionId: primary.sessionId ?? secondary.sessionId,
+    agent: primaryAgentIsGeneric && !isGenericAgentLabel(secondary.agent) ? secondary.agent : primary.agent,
+    category: primary.category ?? secondary.category,
+    status,
+    model: primary.model ?? secondary.model,
+    queuedAt: primary.queuedAt ?? secondary.queuedAt,
+    startedAt: primary.startedAt ?? secondary.startedAt,
+    completedAt: primary.completedAt ?? secondary.completedAt,
+    elapsedMs: Math.max(primary.elapsedMs, secondary.elapsedMs),
+    retryCount: Math.max(primary.retryCount, secondary.retryCount),
+    progress: primary.progress ?? secondary.progress,
+    attempts: mergeAttempts(primary.attempts, secondary.attempts),
+    error: primary.error ?? secondary.error,
+  }
 }
 
 function parseModelSummary(value: string | undefined): BackgroundTaskSnapshot["model"] | undefined {
@@ -643,13 +729,38 @@ export function mergeBackgroundTaskSnapshots(
   if (metadataTasks.length === 0) return fallbackTasks
   if (fallbackTasks.length === 0) return metadataTasks
 
-  const sessionIDs = new Set(metadataTasks.map((task) => task.sessionId).filter((value): value is string => !!value))
-  const taskIDs = new Set(metadataTasks.map((task) => task.id))
+  const merged = [...metadataTasks]
 
-  return [
-    ...metadataTasks,
-    ...fallbackTasks.filter((task) => !taskIDs.has(task.id) && (!task.sessionId || !sessionIDs.has(task.sessionId))),
-  ]
+  for (const fallbackTask of fallbackTasks) {
+    const exactMatchIndex = merged.findIndex((task) =>
+      task.id === fallbackTask.id || (!!task.sessionId && task.sessionId === fallbackTask.sessionId),
+    )
+    if (exactMatchIndex >= 0) {
+      merged[exactMatchIndex] = mergeBackgroundTaskSnapshot(merged[exactMatchIndex]!, fallbackTask)
+      continue
+    }
+
+    const compatibleMatches = merged
+      .map((task, index) => ({ task, index }))
+      .filter(({ task }) => areCompatibleBackgroundTasks(task, fallbackTask))
+
+    if (compatibleMatches.length === 1) {
+      const index = compatibleMatches[0]!.index
+      const fallbackCandidates = fallbackTasks.filter((task) =>
+        areCompatibleBackgroundTasks(compatibleMatches[0]!.task, task),
+      )
+      if (fallbackCandidates.length !== 1) {
+        merged.push(fallbackTask)
+        continue
+      }
+      merged[index] = mergeBackgroundTaskSnapshot(merged[index]!, fallbackTask)
+      continue
+    }
+
+    merged.push(fallbackTask)
+  }
+
+  return merged
 }
 
 export function deriveFallbackBackgroundTasks(input: {
