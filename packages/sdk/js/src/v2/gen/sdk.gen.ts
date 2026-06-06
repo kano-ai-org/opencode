@@ -155,6 +155,7 @@ import type {
   QuestionListResponses,
   QuestionRejectErrors,
   QuestionRejectResponses,
+  QuestionRequest,
   QuestionReplyErrors,
   QuestionReplyResponses,
   SessionAbortErrors,
@@ -2702,6 +2703,7 @@ export class Question extends HeyApiClient {
       directory?: string
       workspace?: string
       answers?: Array<QuestionAnswer>
+      request?: QuestionRequest
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2714,6 +2716,7 @@ export class Question extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "body", key: "answers" },
+            { in: "body", key: "request" },
           ],
         },
       ],

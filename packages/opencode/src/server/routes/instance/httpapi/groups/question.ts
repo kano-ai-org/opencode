@@ -13,6 +13,9 @@ const ReplyPayload = Schema.Struct({
   answers: Schema.Array(Question.Answer).annotate({
     description: "User answers in order of questions (each answer is an array of selected labels)",
   }),
+  request: Schema.optional(Question.Request).annotate({
+    description: "Original question request snapshot used to recover stale in-memory requests",
+  }),
 })
 
 export const QuestionApi = HttpApi.make("question")

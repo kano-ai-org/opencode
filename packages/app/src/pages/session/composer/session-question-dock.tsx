@@ -205,7 +205,12 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   }
 
   const replyMutation = useMutation(() => ({
-    mutationFn: (answers: QuestionAnswer[]) => sdk.client.question.reply({ requestID: props.request.id, answers }),
+    mutationFn: (answers: QuestionAnswer[]) =>
+      sdk.client.question.reply({
+        requestID: props.request.id,
+        answers,
+        request: props.request,
+      }),
     onMutate: () => {
       props.onSubmit()
     },

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import type { PermissionRequest, QuestionRequest, Session } from "@opencode-ai/sdk/v2/client"
-import { todoState } from "./session-composer-state"
-import { sessionPermissionRequest, sessionQuestionRequest } from "./session-request-tree"
+import type { Message, Part, PermissionRequest, QuestionRequest, Session, ToolPart } from "@opencode-ai/sdk/v2/client"
+import { todoState } from "./session-composer-state.logic"
+import { isQuestionRequestActive, sessionPermissionRequest, sessionQuestionRequest } from "./session-request-tree"
 
 const session = (input: { id: string; parentID?: string }) =>
   ({
@@ -15,12 +15,91 @@ const permission = (id: string, sessionID: string) =>
     sessionID,
   }) as PermissionRequest
 
-const question = (id: string, sessionID: string) =>
+const question = (id: string, sessionID: string, tool?: QuestionRequest["tool"]) =>
   ({
     id,
     sessionID,
     questions: [],
+    tool,
   }) as QuestionRequest
+
+const assistant = (id: string, sessionID: string) =>
+  ({
+    id,
+    sessionID,
+    role: "assistant",
+    parentID: "user-0",
+    modelID: "gpt-5",
+    providerID: "openai",
+    mode: "build",
+    agent: "codex",
+    path: { cwd: "/", root: "/" },
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: 1 },
+  }) as Message
+
+const user = (id: string, sessionID: string) =>
+  ({
+    id,
+    sessionID,
+    role: "user",
+    time: { created: 1 },
+    agent: "codex",
+    model: { providerID: "openai", modelID: "gpt-5" },
+  }) as Message
+
+const textPart = (messageID: string, synthetic?: boolean) =>
+  ({
+    id: `txt-${messageID}-${synthetic ? "synthetic" : "real"}`,
+    sessionID: "root",
+    messageID,
+    type: "text",
+    text: "hello",
+    synthetic,
+  }) as Part
+
+const questionToolPart = (input: {
+  messageID: string
+  callID?: string
+  status: ToolPart["state"]["status"]
+}) =>
+  ({
+    id: `tool-${input.messageID}`,
+    sessionID: "root",
+    messageID: input.messageID,
+    type: "tool",
+    callID: input.callID ?? "call-question",
+    tool: "question",
+    state:
+      input.status === "completed"
+        ? {
+            status: "completed",
+            input: {},
+            output: "done",
+            title: "Asked 1 question",
+            metadata: {},
+            time: { start: 1, end: 2 },
+          }
+        : input.status === "error"
+          ? {
+              status: "error",
+              input: {},
+              error: "dismissed",
+              time: { start: 1, end: 2 },
+            }
+          : input.status === "pending"
+            ? {
+                status: "pending",
+                input: {},
+                raw: "{}",
+              }
+            : {
+                status: "running",
+                input: {},
+                time: { start: 1 },
+              },
+  }) as ToolPart
 
 describe("sessionPermissionRequest", () => {
   test("prefers the current session permission", () => {
@@ -102,6 +181,74 @@ describe("sessionQuestionRequest", () => {
     }
 
     expect(sessionQuestionRequest(sessions, questions, "root")?.id).toBe("q-grand")
+  })
+
+  test("skips questions whose tool part already completed", () => {
+    const sessions = [session({ id: "root" })]
+    const requests = {
+      root: [
+        question("q-stale", "root", {
+          messageID: "msg-question",
+          callID: "call-question",
+        }),
+      ],
+    }
+    const messages = {
+      root: [assistant("msg-question", "root")],
+    }
+    const parts = {
+      "msg-question": [questionToolPart({ messageID: "msg-question", status: "completed" })],
+    }
+
+    expect(
+      sessionQuestionRequest(sessions, requests, "root", (item) => isQuestionRequestActive(messages, parts, item)),
+    ).toBeUndefined()
+  })
+
+  test("skips questions after a newer real user turn", () => {
+    const sessions = [session({ id: "root" })]
+    const requests = {
+      root: [
+        question("q-stale", "root", {
+          messageID: "msg-question",
+          callID: "call-question",
+        }),
+      ],
+    }
+    const messages = {
+      root: [assistant("msg-question", "root"), user("msg-newer", "root")],
+    }
+    const parts = {
+      "msg-question": [questionToolPart({ messageID: "msg-question", status: "running" })],
+      "msg-newer": [textPart("msg-newer")],
+    }
+
+    expect(
+      sessionQuestionRequest(sessions, requests, "root", (item) => isQuestionRequestActive(messages, parts, item)),
+    ).toBeUndefined()
+  })
+
+  test("keeps questions when the newer user turn is synthetic only", () => {
+    const sessions = [session({ id: "root" })]
+    const requests = {
+      root: [
+        question("q-live", "root", {
+          messageID: "msg-question",
+          callID: "call-question",
+        }),
+      ],
+    }
+    const messages = {
+      root: [assistant("msg-question", "root"), user("msg-system", "root")],
+    }
+    const parts = {
+      "msg-question": [questionToolPart({ messageID: "msg-question", status: "running" })],
+      "msg-system": [textPart("msg-system", true)],
+    }
+
+    expect(
+      sessionQuestionRequest(sessions, requests, "root", (item) => isQuestionRequestActive(messages, parts, item)),
+    )?.toMatchObject({ id: "q-live" })
   })
 })
 

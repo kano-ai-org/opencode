@@ -2,12 +2,12 @@ import { afterEach, describe, expect } from "bun:test"
 import path from "path"
 import fs from "fs/promises"
 import { fileURLToPath, pathToFileURL } from "url"
-import { Effect, Layer, Result, Schema } from "effect"
+import { Effect, Fiber, Layer, Result, Schema } from "effect"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { ToolRegistry } from "@/tool/registry"
 import { Tool } from "@/tool/tool"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
-import { testEffect } from "../lib/effect"
+import { pollWithTimeout, testEffect } from "../lib/effect"
 import { TestConfig } from "../fixture/config"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Plugin } from "@/plugin"
@@ -96,6 +96,7 @@ const brokenPluginLayer = Layer.succeed(
 )
 
 const it = testEffect(Layer.mergeAll(registryLayer(), node, Agent.defaultLayer))
+const questionIt = testEffect(Layer.mergeAll(registryLayer(), Question.defaultLayer, Bus.layer, node, Agent.defaultLayer))
 const scout = testEffect(
   Layer.mergeAll(registryLayer({ flags: { experimentalScout: true } }), node, Agent.defaultLayer),
 )
@@ -108,6 +109,60 @@ afterEach(async () => {
 })
 
 describe("tool.registry", () => {
+  questionIt.instance("shares pending question state with the outer Question service", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const question = yield* Question.Service
+      const tool = (yield* registry.tools({
+        providerID: ProviderID.opencode,
+        modelID: ModelID.make("test"),
+        agent: { name: "build", mode: "primary", permission: [], options: {} },
+      })).find((item) => item.id === "question")
+
+      if (!tool) throw new Error("question tool not found")
+
+      const ctx = {
+        sessionID: SessionID.make("ses_registry-question"),
+        messageID: MessageID.make("msg_registry-question"),
+        callID: "call_registry-question",
+        agent: "build",
+        abort: AbortSignal.any([]),
+        messages: [],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+      } satisfies Tool.Context
+
+      const fiber = yield* tool
+        .execute(
+          {
+            questions: [
+              {
+                question: "Mode?",
+                header: "Mode",
+                options: [{ label: "Chunked", description: "Incremental output" }],
+              },
+            ],
+          },
+          ctx,
+        )
+        .pipe(Effect.forkScoped)
+
+      yield* Effect.addFinalizer(() => Fiber.interrupt(fiber).pipe(Effect.ignore))
+
+      const pending = yield* pollWithTimeout(
+        question.list().pipe(
+          Effect.map((items) => items.find((item) => item.tool?.callID === ctx.callID && item.tool?.messageID === ctx.messageID)),
+        ),
+        "question tool request did not appear in outer Question service",
+      )
+
+      yield* question.reply({ requestID: pending.id, answers: [["Chunked"]] })
+      const result = yield* Fiber.join(fiber)
+
+      expect(result.title).toBe("Asked 1 question")
+    }),
+  )
+
   it.instance("hides repo research tools unless experimental", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service

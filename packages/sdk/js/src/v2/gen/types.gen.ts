@@ -5788,6 +5788,7 @@ export type QuestionReplyData = {
      * User answers in order of questions (each answer is an array of selected labels)
      */
     answers: Array<QuestionAnswer>
+    request?: QuestionRequest
   }
   path: {
     requestID: string

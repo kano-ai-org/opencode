@@ -1,4 +1,4 @@
-import type { PermissionRequest, QuestionRequest, Session } from "@opencode-ai/sdk/v2/client"
+import type { Message, Part, PermissionRequest, QuestionRequest, Session, ToolPart } from "@opencode-ai/sdk/v2/client"
 
 function sessionTreeRequest<T>(
   session: Session[],
@@ -49,4 +49,40 @@ export function sessionQuestionRequest(
   include?: (item: QuestionRequest) => boolean,
 ) {
   return sessionTreeRequest(session, request, sessionID, include)
+}
+
+function isLiveQuestionToolPart(part: Part | undefined): part is ToolPart {
+  return part?.type === "tool" && part.tool === "question"
+}
+
+function isRealUserMessage(
+  message: Message,
+  part: Record<string, Part[] | undefined>,
+): message is Extract<Message, { role: "user" }> {
+  if (message.role !== "user") return false
+  return (part[message.id] ?? []).some((item) => !("synthetic" in item) || item.synthetic !== true)
+}
+
+export function isQuestionRequestActive(
+  message: Record<string, Message[] | undefined>,
+  part: Record<string, Part[] | undefined>,
+  request: QuestionRequest,
+) {
+  const tool = request.tool
+  if (!tool) return true
+
+  const toolPart = part[tool.messageID]?.find(
+    (item): item is ToolPart => isLiveQuestionToolPart(item) && item.callID === tool.callID,
+  )
+  if (toolPart && toolPart.state.status !== "pending" && toolPart.state.status !== "running") {
+    return false
+  }
+
+  const messages = message[request.sessionID]
+  if (!messages) return true
+
+  const messageIndex = messages.findIndex((item) => item.id === tool.messageID)
+  if (messageIndex === -1) return true
+
+  return !messages.slice(messageIndex + 1).some((item) => isRealUserMessage(item, part))
 }
