@@ -538,6 +538,69 @@ describe("background task metadata parser", () => {
     })
   })
 
+  test("uses input task_id to resolve resumed child session model", () => {
+    const tasks = deriveMessageFallbackBackgroundTasks({
+      rootSessionId: "ses_root",
+      sessions: [
+        {
+          id: "ses_root",
+          title: "Root session",
+          time: { created: Date.parse("2026-06-06T00:00:00.000Z"), updated: Date.parse("2026-06-06T00:10:00.000Z") },
+        },
+        {
+          id: "ses_child",
+          parentID: "ses_root",
+          title: "Implement kfg init (@Sisyphus-Junior subagent)",
+          agent: "Sisyphus-Junior",
+          model: { id: "MiniMax-M3", providerID: "minimax" },
+          time: { created: Date.parse("2026-06-06T00:00:10.000Z"), updated: Date.parse("2026-06-06T00:10:00.000Z") },
+        },
+      ] as any,
+      statuses: {},
+      messages: {
+        ses_root: [
+          {
+            id: "msg_user",
+            role: "user",
+            time: { created: Date.parse("2026-06-06T00:00:00.000Z") },
+          },
+          {
+            id: "msg_assistant",
+            role: "assistant",
+            parentID: "msg_user",
+            time: { created: Date.parse("2026-06-06T00:00:05.000Z") },
+          },
+        ] as any,
+      },
+      parts: {
+        msg_assistant: [
+          {
+            id: "prt_resume",
+            type: "tool",
+            tool: "task",
+            state: {
+              status: "running",
+              input: {
+                description: "Resume kfg init",
+                task_id: "ses_child",
+              },
+            },
+          },
+        ] as any,
+      },
+      now: Date.parse("2026-06-06T00:10:00.000Z"),
+    })
+
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0]).toMatchObject({
+      sessionId: "ses_child",
+      description: "Resume kfg init",
+      agent: "Sisyphus-Junior",
+      status: "running",
+      model: { providerID: "minimax", modelID: "MiniMax-M3" },
+    })
+  })
+
   test("hides stale pending launch rows when the child session is inactive", () => {
     const tasks = deriveMessageFallbackBackgroundTasks({
       rootSessionId: "ses_root",

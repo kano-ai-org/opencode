@@ -619,13 +619,17 @@ function parseToolBackgroundSnapshot(input: {
   const toolInput = "input" in part.state && isRecord(part.state.input) ? part.state.input : undefined
   const output = "output" in part.state && typeof part.state.output === "string" ? part.state.output : undefined
 
+  const inputTaskId = readString(toolInput ?? {}, "task_id") ?? readString(toolInput ?? {}, "taskId")
   const sessionId = readString(metadata ?? {}, "sessionId")
     ?? parseOutputMatch(output, /session_id:\s*(ses_[A-Za-z0-9]+)/i)
     ?? parseOutputMatch(output, /Session ID:\s*(ses_[A-Za-z0-9]+)/i)
+    ?? (inputTaskId?.startsWith("ses_") ? inputTaskId : undefined)
+  const sessionInfo = sessionId ? input.sessions.get(sessionId) : undefined
   const backgroundTaskId = readString(metadata ?? {}, "backgroundTaskId")
     ?? parseOutputMatch(output, /background_task_id:\s*(bg_[A-Za-z0-9]+)/i)
     ?? parseOutputMatch(output, /Background Task ID:\s*(bg_[A-Za-z0-9]+)/i)
     ?? parseOutputMatch(output, /Task ID:\s*(bg_[A-Za-z0-9]+)/i)
+    ?? (inputTaskId?.startsWith("bg_") ? inputTaskId : undefined)
   const metadataTaskId = readString(metadata ?? {}, "taskId")
     ?? parseOutputMatch(output, /task_id:\s*((?:ses|bg)_[A-Za-z0-9]+)/i)
   const description = readString(metadata ?? {}, "description")
@@ -636,12 +640,12 @@ function parseToolBackgroundSnapshot(input: {
     readString(metadata ?? {}, "agent")
       ?? parseOutputMatch(output, /^Agent:\s*(.+)$/im)
       ?? readString(toolInput ?? {}, "subagent_type")
-      ?? readString(toolInput ?? {}, "requested_subagent_type"),
+      ?? readString(toolInput ?? {}, "requested_subagent_type")
+      ?? sessionInfo?.agent,
   ) ?? "subagent"
   const category = readString(metadata ?? {}, "category")
     ?? readString(toolInput ?? {}, "category")
     ?? readString(toolInput ?? {}, "subagent_type")
-  const sessionInfo = sessionId ? input.sessions.get(sessionId) : undefined
   const model = readModel(metadata?.model)
     ?? parseModelSummary(parseOutputMatch(output, /^Model:\s*(.+)$/im))
     ?? modelFromMessages(sessionId ? input.messages[sessionId] : undefined)
