@@ -476,6 +476,125 @@ describe("background task metadata parser", () => {
     })
   })
 
+  test("uses child session model when launch output has no model metadata", () => {
+    const tasks = deriveMessageFallbackBackgroundTasks({
+      rootSessionId: "ses_root",
+      sessions: [
+        {
+          id: "ses_root",
+          title: "Root session",
+          time: { created: Date.parse("2026-06-06T00:00:00.000Z"), updated: Date.parse("2026-06-06T00:01:00.000Z") },
+        },
+        {
+          id: "ses_child",
+          parentID: "ses_root",
+          title: "Explore T5 context (@explore subagent)",
+          model: { id: "MiniMax-M3", providerID: "minimax" },
+          time: { created: Date.parse("2026-06-06T00:00:10.000Z"), updated: Date.parse("2026-06-06T00:00:30.000Z") },
+        },
+      ] as any,
+      statuses: {},
+      messages: {
+        ses_root: [
+          {
+            id: "msg_user",
+            role: "user",
+            time: { created: Date.parse("2026-06-06T00:00:00.000Z") },
+          },
+          {
+            id: "msg_assistant",
+            role: "assistant",
+            parentID: "msg_user",
+            time: {
+              created: Date.parse("2026-06-06T00:00:05.000Z"),
+              completed: Date.parse("2026-06-06T00:00:06.000Z"),
+            },
+          },
+        ] as any,
+      },
+      parts: {
+        msg_assistant: [
+          {
+            id: "prt_launch",
+            type: "tool",
+            tool: "call_omo_agent",
+            state: {
+              status: "completed",
+              input: { description: "Explore T5 context" },
+              output:
+                "Background agent task launched successfully.\nTask ID: bg_context\nSession ID: ses_child\nDescription: Explore T5 context\nAgent: explore (subagent)\nStatus: pending",
+            },
+          },
+        ] as any,
+      },
+      now: Date.parse("2026-06-06T00:00:33.000Z"),
+    })
+
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0]).toMatchObject({
+      sessionId: "ses_child",
+      status: "pending",
+      model: { providerID: "minimax", modelID: "MiniMax-M3" },
+    })
+  })
+
+  test("hides stale pending launch rows when the child session is inactive", () => {
+    const tasks = deriveMessageFallbackBackgroundTasks({
+      rootSessionId: "ses_root",
+      sessions: [
+        {
+          id: "ses_root",
+          title: "Root session",
+          time: { created: Date.parse("2026-06-06T00:00:00.000Z"), updated: Date.parse("2026-06-06T00:10:00.000Z") },
+        },
+        {
+          id: "ses_child",
+          parentID: "ses_root",
+          title: "Research Meshy contract (@librarian subagent)",
+          model: { id: "MiniMax-M3", providerID: "minimax" },
+          time: { created: Date.parse("2026-06-06T00:00:10.000Z"), updated: Date.parse("2026-06-06T00:01:00.000Z") },
+        },
+      ] as any,
+      statuses: {},
+      messages: {
+        ses_root: [
+          {
+            id: "msg_user",
+            role: "user",
+            time: { created: Date.parse("2026-06-06T00:00:00.000Z") },
+          },
+          {
+            id: "msg_assistant",
+            role: "assistant",
+            parentID: "msg_user",
+            time: {
+              created: Date.parse("2026-06-06T00:00:05.000Z"),
+              completed: Date.parse("2026-06-06T00:00:06.000Z"),
+            },
+          },
+        ] as any,
+      },
+      parts: {
+        msg_assistant: [
+          {
+            id: "prt_launch",
+            type: "tool",
+            tool: "call_omo_agent",
+            state: {
+              status: "completed",
+              input: { description: "Research Meshy contract" },
+              output:
+                "Background agent task launched successfully.\nTask ID: bg_contract\nSession ID: ses_child\nDescription: Research Meshy contract\nAgent: librarian (subagent)\nStatus: pending",
+            },
+          },
+        ] as any,
+      },
+      now: Date.parse("2026-06-06T00:01:06.001Z"),
+    })
+
+    expect(tasks).toEqual([])
+  })
+
   test("hides stale completed message-derived batches after retention", () => {
     const tasks = deriveMessageFallbackBackgroundTasks({
       rootSessionId: "ses_root",

@@ -59,6 +59,13 @@ type SessionLike = {
   id: Session["id"]
   parentID?: Session["parentID"]
   title: Session["title"]
+  agent?: Session["agent"]
+  model?: {
+    id?: string
+    providerID?: string
+    modelID?: string
+    variant?: string
+  }
   time: {
     created: number
     updated: number
@@ -255,6 +262,17 @@ function modelFromMessages(messages: MessageLike[] | undefined): BackgroundTaskS
     }
   }
   return undefined
+}
+
+function modelFromSession(session: SessionLike | undefined): BackgroundTaskSnapshot["model"] | undefined {
+  const model = session?.model
+  const modelID = model?.modelID ?? model?.id
+  if (!model?.providerID || !modelID) return undefined
+  return {
+    providerID: model.providerID,
+    modelID,
+    ...(model.variant ? { variant: model.variant } : {}),
+  }
 }
 
 function isDescendantOfRoot(session: SessionLike, rootSessionId: string, sessions: Map<string, SessionLike>): boolean {
@@ -623,9 +641,11 @@ function parseToolBackgroundSnapshot(input: {
   const category = readString(metadata ?? {}, "category")
     ?? readString(toolInput ?? {}, "category")
     ?? readString(toolInput ?? {}, "subagent_type")
+  const sessionInfo = sessionId ? input.sessions.get(sessionId) : undefined
   const model = readModel(metadata?.model)
     ?? parseModelSummary(parseOutputMatch(output, /^Model:\s*(.+)$/im))
     ?? modelFromMessages(sessionId ? input.messages[sessionId] : undefined)
+    ?? modelFromSession(sessionInfo)
 
   const launchedInBackground = !!output
     && /Background (?:agent )?task launched/i.test(output)
@@ -650,11 +670,20 @@ function parseToolBackgroundSnapshot(input: {
 
   if (!status) return undefined
 
-  const sessionInfo = sessionId ? input.sessions.get(sessionId) : undefined
   const startedAtMs = sessionInfo?.time.created
     ?? toolStateTimestamp(part, "start")
     ?? input.message.time.created
+  const staleInactiveSessionCompletedAt = sessionInfo
+    && !childState
+    && !isActiveSessionStatus(input.statuses[sessionId ?? ""])
+    && input.now - sessionInfo.time.updated > BACKGROUND_TASK_COMPLETED_RETENTION_MS
+    ? toIso(sessionInfo.time.updated)
+    : undefined
+  if (status === "pending" && staleInactiveSessionCompletedAt) {
+    status = "completed"
+  }
   const completedAt = childState?.completedAt
+    ?? staleInactiveSessionCompletedAt
     ?? (status === "completed" || status === "error" || status === "cancelled" || status === "interrupt"
       ? toIso(toolStateTimestamp(part, "end") ?? input.message.time.completed)
       : undefined)
@@ -784,7 +813,7 @@ export function deriveFallbackBackgroundTasks(input: {
     .map((session) => {
       const parsed = parseSubagentSessionTitle(session.title)
       const status = input.statuses[session.id]
-      const model = modelFromMessages(input.messages?.[session.id])
+      const model = modelFromMessages(input.messages?.[session.id]) ?? modelFromSession(session)
       const startedAt = new Date(session.time.created).toISOString()
       const retryCount = status?.type === "retry" ? Math.max(0, status.attempt - 1) : 0
       return {
