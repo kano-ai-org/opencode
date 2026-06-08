@@ -95,6 +95,31 @@ describe("session.list", () => {
   )
 
   it.instance(
+    "matches Windows directory slash and case variants",
+    () =>
+      Effect.gen(function* () {
+        const storedDirectory = "C:\\Users\\dorgon.chang\\.agents\\skills\\kano"
+        const queryDirectory = "C:/users/dorgon.chang/.agents/skills/kano"
+        const current = yield* withSession({ title: "windows-directory-session" })
+        const other = yield* withSession({ title: "other-directory-session" })
+
+        yield* Effect.sync(() =>
+          Database.use((db) =>
+            db.update(SessionTable).set({ directory: storedDirectory }).where(eq(SessionTable.id, current.id)).run(),
+          ),
+        )
+
+        const ids = (yield* SessionNs.Service.use((session) =>
+          session.list({ directory: queryDirectory }),
+        )).map((session) => session.id)
+
+        expect(ids).toContain(current.id)
+        expect(ids).not.toContain(other.id)
+      }),
+    { git: true },
+  )
+
+  it.instance(
     "filters by path and ignores directory when path is provided",
     () =>
       Effect.gen(function* () {

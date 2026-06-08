@@ -19,6 +19,7 @@ import { like } from "drizzle-orm"
 import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
+import { sql } from "drizzle-orm"
 import { SyncEvent } from "../sync"
 import type { SQL } from "drizzle-orm"
 import { PartTable, SessionTable } from "./session.sql"
@@ -911,6 +912,25 @@ const cancelBackgroundJobs = Effect.fn("Session.cancelBackgroundJobs")(function*
   )
 })
 
+function isWindowsDirectory(directory: string) {
+  return /^[A-Za-z]:[\\/]/.test(directory) || directory.startsWith("\\\\") || directory.startsWith("//")
+}
+
+function directoryVariants(directory: string) {
+  if (!isWindowsDirectory(directory)) return [directory]
+  return [...new Set([
+    directory,
+    directory.replaceAll("\\", "/"),
+    directory.replaceAll("/", "\\"),
+  ])]
+}
+
+function directoryCondition(directory: string): SQL {
+  const variants = directoryVariants(directory)
+  if (!isWindowsDirectory(directory)) return eq(SessionTable.directory, directory)
+  return or(...variants.map((variant) => sql`lower(${SessionTable.directory}) = lower(${variant})`))!
+}
+
 function* listByProject(
   input: ListInput & {
     projectID: ProjectID
@@ -928,13 +948,13 @@ function* listByProject(
 
       conditions.push(
         input.directory
-          ? or(...conds, and(isNull(SessionTable.path), eq(SessionTable.directory, input.directory))!)!
+          ? or(...conds, and(isNull(SessionTable.path), directoryCondition(input.directory))!)!
           : or(...conds)!,
       )
     }
   } else if (input.scope !== "project" && !input.experimentalWorkspaces) {
     if (input.directory) {
-      conditions.push(eq(SessionTable.directory, input.directory))
+      conditions.push(directoryCondition(input.directory))
     }
   }
   if (input.roots) {
@@ -975,7 +995,7 @@ export function* listGlobal(input?: {
   const conditions: SQL[] = []
 
   if (input?.directory) {
-    conditions.push(eq(SessionTable.directory, input.directory))
+    conditions.push(directoryCondition(input.directory))
   }
   if (input?.roots) {
     conditions.push(isNull(SessionTable.parent_id))
