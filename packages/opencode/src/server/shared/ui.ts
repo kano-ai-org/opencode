@@ -41,11 +41,21 @@ function proxyResponseHeaders(headers: Record<string, string>) {
 }
 
 export function upstreamURL(path: string) {
-  return new URL(path, UI_UPSTREAM).toString()
+  return new URL(path, uiOrigin()).toString()
+}
+
+function uiOrigin() {
+  const configured = process.env.OPENCODE_WEB_UI_ORIGIN?.trim()
+  if (!configured) return UI_UPSTREAM
+  try {
+    return new URL(configured)
+  } catch {
+    return UI_UPSTREAM
+  }
 }
 
 export function embeddedUI(disableEmbeddedWebUi: boolean) {
-  if (disableEmbeddedWebUi) return (embeddedUIPromise ??= loadLocalWebUiDist())
+  if (disableEmbeddedWebUi) return Promise.resolve(null)
   return (embeddedUIPromise ??=
     // @ts-expect-error - generated file at build time
     import("opencode-web-ui.gen.ts")
@@ -102,6 +112,13 @@ function notFound() {
   return HttpServerResponse.jsonUnsafe({ error: "Not Found" }, { status: 404 })
 }
 
+function canFallbackToIndex(requestPath: string) {
+  const normalized = requestPath.replace(/^\//, "")
+  if (!normalized) return true
+  if (normalized.startsWith("assets/")) return false
+  return path.extname(normalized) === ""
+}
+
 function embeddedUIResponse(file: string, body: Uint8Array) {
   const mime = AppFileSystem.mimeType(file)
   const headers = new Headers({ "content-type": mime, "x-opencode-ui-origin": "embedded" })
@@ -116,7 +133,8 @@ export function serveEmbeddedUIEffect(
   fs: AppFileSystem.Interface,
   embeddedWebUI: Record<string, string>,
 ) {
-  const file = embeddedWebUI[requestPath.replace(/^\//, "")] ?? embeddedWebUI["index.html"] ?? null
+  const key = requestPath.replace(/^\//, "")
+  const file = embeddedWebUI[key] ?? (canFallbackToIndex(requestPath) ? embeddedWebUI["index.html"] : undefined) ?? null
   if (!file) return Effect.succeed(notFound())
 
   return fs.readFile(file).pipe(
@@ -135,9 +153,10 @@ export function serveUIEffect(
 
     if (embeddedWebUI) return yield* serveEmbeddedUIEffect(path, services.fs, embeddedWebUI)
 
+    const origin = uiOrigin()
     const response = yield* services.client.execute(
       HttpClientRequest.make(request.method)(upstreamURL(path), {
-        headers: ProxyUtil.headers(request.headers, { host: UI_UPSTREAM.host }),
+        headers: ProxyUtil.headers(request.headers, { host: origin.host }),
         body: requestBody(request),
       }),
     )

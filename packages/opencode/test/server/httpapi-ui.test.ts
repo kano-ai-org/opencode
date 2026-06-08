@@ -29,7 +29,9 @@ const testStateLayer = Layer.effectDiscard(
       OPENCODE_SERVER_USERNAME: Flag.OPENCODE_SERVER_USERNAME,
       envPassword: process.env.OPENCODE_SERVER_PASSWORD,
       envUsername: process.env.OPENCODE_SERVER_USERNAME,
+      envWebUiOrigin: process.env.OPENCODE_WEB_UI_ORIGIN,
     }
+    delete process.env.OPENCODE_WEB_UI_ORIGIN
 
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
@@ -37,6 +39,7 @@ const testStateLayer = Layer.effectDiscard(
         Flag.OPENCODE_SERVER_USERNAME = original.OPENCODE_SERVER_USERNAME
         restoreEnv("OPENCODE_SERVER_PASSWORD", original.envPassword)
         restoreEnv("OPENCODE_SERVER_USERNAME", original.envUsername)
+        restoreEnv("OPENCODE_WEB_UI_ORIGIN", original.envWebUiOrigin)
       }),
     )
   }),
@@ -205,6 +208,30 @@ describe("HttpApi UI fallback", () => {
     }),
   )
 
+  it.live("serves the web UI from OPENCODE_WEB_UI_ORIGIN when configured", () =>
+    Effect.gen(function* () {
+      let proxiedUrl: string | undefined
+      const previous = process.env.OPENCODE_WEB_UI_ORIGIN
+      yield* Effect.addFinalizer(() => Effect.sync(() => restoreEnv("OPENCODE_WEB_UI_ORIGIN", previous)))
+      process.env.OPENCODE_WEB_UI_ORIGIN = "http://127.0.0.1:14455"
+
+      const response = yield* uiApp({
+        disableEmbeddedWebUi: true,
+        client: httpClient(
+          new Response("console.log('dev')", { headers: { "content-type": "text/javascript" } }),
+          (request) => {
+            proxiedUrl = request.url
+          },
+        ),
+      }).request("/assets/index-dev.js")
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get("content-type")).toContain("text/javascript")
+      expect(yield* responseText(response)).toBe("console.log('dev')")
+      expect(proxiedUrl).toBe("http://127.0.0.1:14455/assets/index-dev.js")
+    }),
+  )
+
   it.live("strips upstream transfer encoding headers from proxied assets", () =>
     Effect.gen(function* () {
       let proxiedUrl: string | undefined
@@ -323,6 +350,46 @@ describe("HttpApi UI fallback", () => {
       expect(readPath).toBe("/$bunfs/root/assets/app.js")
       expect(response.headers.get("content-type")).toContain("text/javascript")
       expect(yield* responseText(response)).toBe("console.log('embedded')")
+    }),
+  )
+
+  it.live("does not serve index.html for missing embedded UI assets", () =>
+    Effect.gen(function* () {
+      const fs = yield* AppFileSystem.Service
+      const response = yield* serveEmbeddedUIEffect(
+        "/assets/missing.js",
+        {
+          ...fs,
+          readFile: () => Effect.die("missing asset should not read index.html"),
+        },
+        { "index.html": "/$bunfs/root/index.html" },
+      ).pipe(Effect.map(HttpServerResponse.toWeb))
+
+      expect(response.status).toBe(404)
+      expect(response.headers.get("content-type")).toContain("application/json")
+      expect(yield* responseText(response)).toContain("Not Found")
+    }),
+  )
+
+  it.live("serves index.html for embedded UI deep links", () =>
+    Effect.gen(function* () {
+      const fs = yield* AppFileSystem.Service
+      const response = yield* serveEmbeddedUIEffect(
+        "/QzpcVXNlcnNcZG9yZ29u/session/ses_123",
+        {
+          ...fs,
+          readFile: (path) => {
+            return path === "/$bunfs/root/index.html"
+              ? Effect.succeed(new TextEncoder().encode("<html>app</html>"))
+              : Effect.die(`unexpected embedded UI path: ${path}`)
+          },
+        },
+        { "index.html": "/$bunfs/root/index.html" },
+      ).pipe(Effect.map(HttpServerResponse.toWeb))
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get("content-type")).toContain("text/html")
+      expect(yield* responseText(response)).toBe("<html>app</html>")
     }),
   )
 
