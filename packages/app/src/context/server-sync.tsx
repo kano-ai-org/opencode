@@ -1,7 +1,7 @@
-import type { Config, OpencodeClient, Path, Project, ProviderAuthResponse, Todo } from "@opencode-ai/sdk/v2/client"
+import type { Config, OpencodeClient, Path, Project, ProviderAuthResponse, Session, Todo } from "@opencode-ai/sdk/v2/client"
 import { showToast } from "@opencode-ai/ui/toast"
 import { getFilename } from "@opencode-ai/core/util/path"
-import { batch, createContext, getOwner, onCleanup, onMount, type ParentProps, untrack, useContext } from "solid-js"
+import { batch, createContext, createSignal, getOwner, onCleanup, onMount, type ParentProps, untrack, useContext } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useLanguage } from "@/context/language"
 import type { InitError } from "../pages/error"
@@ -45,6 +45,13 @@ type GlobalStore = {
   provider_auth: ProviderAuthResponse
   config: Config
   reload: undefined | "pending" | "complete"
+}
+
+type LiveRootSessionEvent = {
+  directory: string
+  sessionID: string
+  kind: "created" | "updated"
+  at: number
 }
 
 export const loadMcpQuery = (directory: string, sdk: OpencodeClient) =>
@@ -128,6 +135,7 @@ export function createServerSyncContext() {
       return updateConfigMutation.isPending ? "pending" : undefined
     },
   })
+  const [liveRootSession, setLiveRootSession] = createSignal<LiveRootSessionEvent>()
   const queryClient = useQueryClient()
 
   let bootedAt = 0
@@ -375,7 +383,23 @@ export function createServerSyncContext() {
       return
     }
 
-    const existing = children.children[key]
+    const sessionInfo =
+      event.type === "session.created" || event.type === "session.updated"
+        ? (event.properties as { info?: Session } | undefined)?.info
+        : undefined
+    const liveRoot =
+      sessionInfo && !sessionInfo.parentID && !sessionInfo.time?.archived && sessionInfo.directory
+        ? {
+            directory: sessionInfo.directory,
+            sessionID: sessionInfo.id,
+            kind: event.type === "session.created" ? ("created" as const) : ("updated" as const),
+            at: Date.now(),
+          }
+        : undefined
+
+    if (liveRoot) setLiveRootSession(liveRoot)
+
+    const existing = children.children[key] ?? (liveRoot ? children.ensureChild(directory) : undefined)
     if (!existing) return
     children.mark(key)
     const [store, setStore] = existing
@@ -444,6 +468,7 @@ export function createServerSyncContext() {
   return {
     data: globalStore,
     set,
+    liveRootSession,
     get ready() {
       return globalStore.ready
     },

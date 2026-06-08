@@ -501,6 +501,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     const workspaceVersion = new Map<string, number>()
     const workspaceLoaded = new Set<string>()
     const workspaceLoading = new Set<string>()
+    const autoOpenedSessions = new Set<string>()
     let workspaceSeeded = false
     const workspacePendingSync = new Set<string>()
     const [workspacePendingTick, setWorkspacePendingTick] = createSignal(0)
@@ -818,6 +819,23 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           server.projects.open(worktree)
         }
       })
+    })
+
+    createEffect(() => {
+      if (!serverSync.ready) return
+      const event = serverSync.liveRootSession()
+      if (!event?.sessionID || !event.directory) return
+      if (autoOpenedSessions.has(event.sessionID)) return
+
+      const root = rootFor(event.directory)
+      const exists = server.projects.list().some((project) => workspaceMatch(project.worktree, root))
+      autoOpenedSessions.add(event.sessionID)
+      if (exists) return
+
+      server.projects.open(root)
+      server.projects.touch(root)
+      void serverSync.project.loadSessions(root)
+      void hydrateWorkspaceToggles(root, true)
     })
 
     createEffect(() => {
