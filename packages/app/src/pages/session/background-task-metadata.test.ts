@@ -552,7 +552,7 @@ describe("background task metadata parser", () => {
           parentID: "ses_root",
           title: "Implement kfg init (@Sisyphus-Junior subagent)",
           agent: "Sisyphus-Junior",
-          model: { id: "MiniMax-M3", providerID: "minimax" },
+          model: JSON.stringify({ id: "MiniMax-M3", providerID: "minimax" }),
           time: { created: Date.parse("2026-06-06T00:00:10.000Z"), updated: Date.parse("2026-06-06T00:10:00.000Z") },
         },
       ] as any,
@@ -599,6 +599,87 @@ describe("background task metadata parser", () => {
       status: "running",
       model: { providerID: "minimax", modelID: "MiniMax-M3" },
     })
+  })
+
+  test("hides stale running task rows when the child session has no live status", () => {
+    const tasks = deriveMessageFallbackBackgroundTasks({
+      rootSessionId: "ses_root",
+      sessions: [
+        {
+          id: "ses_root",
+          title: "Root session",
+          time: { created: Date.parse("2026-06-06T00:00:00.000Z"), updated: Date.parse("2026-06-06T00:20:00.000Z") },
+        },
+        {
+          id: "ses_child",
+          parentID: "ses_root",
+          title: "Plan provider filesystem (@plan subagent)",
+          agent: "plan",
+          model: JSON.stringify({ id: "gpt-5.5", providerID: "openai", variant: "xhigh" }),
+          time: { created: Date.parse("2026-06-06T00:00:10.000Z"), updated: Date.parse("2026-06-06T00:01:00.000Z") },
+        },
+      ] as any,
+      statuses: {},
+      messages: {
+        ses_root: [
+          {
+            id: "msg_user",
+            role: "user",
+            time: { created: Date.parse("2026-06-06T00:00:00.000Z") },
+          },
+          {
+            id: "msg_assistant",
+            role: "assistant",
+            parentID: "msg_user",
+            time: { created: Date.parse("2026-06-06T00:00:05.000Z") },
+          },
+        ] as any,
+        ses_child: [
+          {
+            id: "msg_child_user",
+            role: "user",
+            time: { created: Date.parse("2026-06-06T00:00:10.000Z") },
+          },
+          {
+            id: "msg_child_assistant",
+            role: "assistant",
+            parentID: "msg_child_user",
+            time: { created: Date.parse("2026-06-06T00:00:15.000Z") },
+          },
+        ] as any,
+      },
+      parts: {
+        msg_assistant: [
+          {
+            id: "prt_running",
+            type: "tool",
+            tool: "task",
+            state: {
+              status: "running",
+              input: {
+                description: "Plan provider filesystem",
+                task_id: "ses_child",
+              },
+            },
+          },
+        ] as any,
+        msg_child_assistant: [
+          {
+            id: "prt_read",
+            type: "tool",
+            tool: "read",
+            state: {
+              status: "running",
+              input: { filePath: "C:\\Users\\dorgon.chang\\.agents\\skills\\kano\\excluded.env" },
+              time: { start: Date.parse("2026-06-06T00:00:20.000Z") },
+            },
+          },
+        ] as any,
+      },
+      now: Date.parse("2026-06-06T00:20:00.000Z"),
+    })
+
+    expect(tasks).toEqual([])
   })
 
   test("hides stale pending launch rows when the child session is inactive", () => {

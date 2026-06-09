@@ -3,6 +3,7 @@ import type { Message, Part, Session, SessionStatus } from "@opencode-ai/sdk/v2/
 export const BACKGROUND_TASK_METADATA_NAMESPACE = "ohMyOpenAgent"
 export const BACKGROUND_TASK_METADATA_KEY = "backgroundTasks"
 export const BACKGROUND_TASK_COMPLETED_RETENTION_MS = 5_000
+const BACKGROUND_TASK_STALE_INACTIVE_MS = 10 * 60 * 1000
 
 export type BackgroundTaskStatus = "pending" | "running" | "completed" | "error" | "cancelled" | "interrupt"
 
@@ -60,7 +61,7 @@ type SessionLike = {
   parentID?: Session["parentID"]
   title: Session["title"]
   agent?: Session["agent"]
-  model?: {
+  model?: string | {
     id?: string
     providerID?: string
     modelID?: string
@@ -80,7 +81,7 @@ type MessageLike = {
     created: number
     completed?: number
   }
-  model?: {
+  model?: string | {
     providerID?: string
     modelID?: string
     variant?: string
@@ -137,12 +138,24 @@ function readIsoString(record: Record<string, unknown>, key: string): string | u
   return Number.isFinite(Date.parse(value)) ? value : undefined
 }
 
+function readModelRecord(value: unknown): Record<string, unknown> | undefined {
+  if (isRecord(value)) return value
+  if (typeof value !== "string") return undefined
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return isRecord(parsed) ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function readModel(value: unknown): BackgroundTaskSnapshot["model"] | undefined {
-  if (!isRecord(value)) return undefined
-  const providerID = readString(value, "providerID")
-  const modelID = readString(value, "modelID")
+  const record = readModelRecord(value)
+  if (!record) return typeof value === "string" ? parseModelSummary(value) : undefined
+  const providerID = readString(record, "providerID")
+  const modelID = readString(record, "modelID") ?? readString(record, "id")
   if (!providerID || !modelID) return undefined
-  const variant = readString(value, "variant")
+  const variant = readString(record, "variant")
   return { providerID, modelID, ...(variant ? { variant } : {}) }
 }
 
@@ -246,13 +259,8 @@ function modelFromMessages(messages: MessageLike[] | undefined): BackgroundTaskS
   if (!messages?.length) return undefined
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
-    if (message.model?.providerID && message.model?.modelID) {
-      return {
-        providerID: message.model.providerID,
-        modelID: message.model.modelID,
-        ...(message.model.variant ? { variant: message.model.variant } : {}),
-      }
-    }
+    const model = readModel(message.model)
+    if (model) return model
     if (message.providerID && message.modelID) {
       return {
         providerID: message.providerID,
@@ -265,14 +273,7 @@ function modelFromMessages(messages: MessageLike[] | undefined): BackgroundTaskS
 }
 
 function modelFromSession(session: SessionLike | undefined): BackgroundTaskSnapshot["model"] | undefined {
-  const model = session?.model
-  const modelID = model?.modelID ?? model?.id
-  if (!model?.providerID || !modelID) return undefined
-  return {
-    providerID: model.providerID,
-    modelID,
-    ...(model.variant ? { variant: model.variant } : {}),
-  }
+  return readModel(session?.model)
 }
 
 function isDescendantOfRoot(session: SessionLike, rootSessionId: string, sessions: Map<string, SessionLike>): boolean {
@@ -313,6 +314,18 @@ function toolStateTimestamp(part: Part, key: "start" | "end"): number | undefine
 
 function toIso(timestamp: number | undefined): string | undefined {
   return timestamp === undefined ? undefined : new Date(timestamp).toISOString()
+}
+
+function staleInactiveSessionCompletedAt(input: {
+  session: SessionLike | undefined
+  status: SessionStatus | undefined
+  now: number
+  staleMs: number
+}): string | undefined {
+  if (!input.session) return undefined
+  if (isActiveSessionStatus(input.status)) return undefined
+  if (input.now - input.session.time.updated <= input.staleMs) return undefined
+  return toIso(input.session.time.updated)
 }
 
 function truncateMessage(value: string | undefined, limit = 180): string | undefined {
@@ -664,8 +677,16 @@ function parseToolBackgroundSnapshot(input: {
       })
     : undefined
 
+  const staleCompletedAt = staleInactiveSessionCompletedAt({
+    session: sessionInfo,
+    status: input.statuses[sessionId ?? ""],
+    now: input.now,
+    staleMs: childState ? BACKGROUND_TASK_STALE_INACTIVE_MS : BACKGROUND_TASK_COMPLETED_RETENTION_MS,
+  })
+
   let status: BackgroundTaskStatus | undefined
-  if (part.state.status === "running") status = "running"
+  if (childState?.status && terminalStatuses.has(childState.status)) status = childState.status
+  else if (part.state.status === "running") status = "running"
   else if (part.state.status === "error") status = "error"
   else if (childState?.status) status = childState.status
   else if (reviewRunning) status = "running"
@@ -677,17 +698,13 @@ function parseToolBackgroundSnapshot(input: {
   const startedAtMs = sessionInfo?.time.created
     ?? toolStateTimestamp(part, "start")
     ?? input.message.time.created
-  const staleInactiveSessionCompletedAt = sessionInfo
-    && !childState
-    && !isActiveSessionStatus(input.statuses[sessionId ?? ""])
-    && input.now - sessionInfo.time.updated > BACKGROUND_TASK_COMPLETED_RETENTION_MS
-    ? toIso(sessionInfo.time.updated)
-    : undefined
-  if (status === "pending" && staleInactiveSessionCompletedAt) {
+  if (staleCompletedAt && activeStatuses.has(status)) {
+    status = "interrupt"
+  } else if (status === "pending" && staleCompletedAt) {
     status = "completed"
   }
   const completedAt = childState?.completedAt
-    ?? staleInactiveSessionCompletedAt
+    ?? staleCompletedAt
     ?? (status === "completed" || status === "error" || status === "cancelled" || status === "interrupt"
       ? toIso(toolStateTimestamp(part, "end") ?? input.message.time.completed)
       : undefined)
