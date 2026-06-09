@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, Part, PermissionRequest, QuestionRequest, Session, ToolPart } from "@opencode-ai/sdk/v2/client"
-import { todoState } from "./session-composer-state.logic"
+import {
+  isPermissionRequestNotFoundError,
+  removePermissionRequest,
+  todoState,
+} from "./session-composer-state.logic"
 import { isQuestionRequestActive, sessionPermissionRequest, sessionQuestionRequest } from "./session-request-tree"
 
 const session = (input: { id: string; parentID?: string }) =>
@@ -271,5 +275,36 @@ describe("todoState", () => {
 
   test("clears completed todos when the session is no longer live", () => {
     expect(todoState({ count: 2, done: true, live: false })).toBe("clear")
+  })
+})
+
+describe("permission reply stale request handling", () => {
+  test("recognizes matching missing permission request errors", () => {
+    expect(
+      isPermissionRequestNotFoundError(
+        new Error("Permission request not found: per_123"),
+        "per_123",
+      ),
+    ).toBe(true)
+    expect(
+      isPermissionRequestNotFoundError(
+        new Error("Permission request not found: per_other"),
+        "per_123",
+      ),
+    ).toBe(false)
+    expect(isPermissionRequestNotFoundError(new Error("Network failed"), "per_123")).toBe(false)
+  })
+
+  test("removes only the stale permission request", () => {
+    expect(
+      removePermissionRequest(
+        [
+          permission("per_1", "root"),
+          permission("per_2", "root"),
+        ],
+        "per_1",
+      ).map((item) => item.id),
+    ).toEqual(["per_2"])
+    expect(removePermissionRequest(undefined, "per_1")).toEqual([])
   })
 })

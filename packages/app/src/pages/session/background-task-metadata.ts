@@ -255,6 +255,35 @@ function parseSubagentSessionTitle(title: string): { description: string; agent:
   }
 }
 
+function findMatchingChildSession(input: {
+  parentSessionId: string
+  sessions: Map<string, SessionLike>
+  description: string
+  startedAt?: number
+}): SessionLike | undefined {
+  const description = normalizedTaskText(input.description)
+  if (!description) return undefined
+
+  const matches = [...input.sessions.values()].filter((session) => {
+    if (session.parentID !== input.parentSessionId) return false
+    const parsed = parseSubagentSessionTitle(session.title)
+    return normalizedTaskText(parsed.description) === description
+  })
+  if (matches.length === 0) return undefined
+  if (matches.length === 1) return matches[0]
+  if (input.startedAt === undefined) return undefined
+
+  const close = matches
+    .map((session) => ({
+      session,
+      distance: Math.abs(session.time.created - input.startedAt!),
+    }))
+    .filter((item) => item.distance <= duplicateTaskTimeWindowMs)
+    .sort((left, right) => left.distance - right.distance)
+
+  return close.length === 1 || close[0]?.distance !== close[1]?.distance ? close[0]?.session : undefined
+}
+
 function modelFromMessages(messages: MessageLike[] | undefined): BackgroundTaskSnapshot["model"] | undefined {
   if (!messages?.length) return undefined
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -633,11 +662,10 @@ function parseToolBackgroundSnapshot(input: {
   const output = "output" in part.state && typeof part.state.output === "string" ? part.state.output : undefined
 
   const inputTaskId = readString(toolInput ?? {}, "task_id") ?? readString(toolInput ?? {}, "taskId")
-  const sessionId = readString(metadata ?? {}, "sessionId")
+  const explicitSessionId = readString(metadata ?? {}, "sessionId")
     ?? parseOutputMatch(output, /session_id:\s*(ses_[A-Za-z0-9]+)/i)
     ?? parseOutputMatch(output, /Session ID:\s*(ses_[A-Za-z0-9]+)/i)
     ?? (inputTaskId?.startsWith("ses_") ? inputTaskId : undefined)
-  const sessionInfo = sessionId ? input.sessions.get(sessionId) : undefined
   const backgroundTaskId = readString(metadata ?? {}, "backgroundTaskId")
     ?? parseOutputMatch(output, /background_task_id:\s*(bg_[A-Za-z0-9]+)/i)
     ?? parseOutputMatch(output, /Background Task ID:\s*(bg_[A-Za-z0-9]+)/i)
@@ -649,6 +677,15 @@ function parseToolBackgroundSnapshot(input: {
     ?? readString(toolInput ?? {}, "description")
     ?? parseOutputMatch(output, /^Description:\s*(.+)$/im)
     ?? (part.tool === "call_omo_agent" ? "Background agent" : "Background task")
+  const explicitSessionInfo = explicitSessionId ? input.sessions.get(explicitSessionId) : undefined
+  const inferredSessionInfo = explicitSessionInfo ?? findMatchingChildSession({
+    parentSessionId: input.parentSessionId,
+    sessions: input.sessions,
+    description,
+    startedAt: toolStateTimestamp(part, "start") ?? input.message.time.created,
+  })
+  const sessionId = explicitSessionId ?? inferredSessionInfo?.id
+  const sessionInfo = explicitSessionInfo ?? inferredSessionInfo
   const agent = normalizeAgentLabel(
     readString(metadata ?? {}, "agent")
       ?? parseOutputMatch(output, /^Agent:\s*(.+)$/im)

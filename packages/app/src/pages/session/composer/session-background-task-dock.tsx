@@ -2,7 +2,9 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "so
 import { useNavigate } from "@solidjs/router"
 import { DockTray } from "@opencode-ai/ui/dock-surface"
 import { IconButton } from "@opencode-ai/ui/icon-button"
+import type { Session } from "@opencode-ai/sdk/v2/client"
 import { useSync } from "@/context/sync"
+import { useSDK } from "@/context/sdk"
 import { useSessionKey } from "@/pages/session/session-layout"
 import {
   backgroundTaskActivityLabel,
@@ -58,10 +60,12 @@ function sessionLinkLabel(task: BackgroundTaskSnapshot): string {
 export function SessionBackgroundTaskDock() {
   const route = useSessionKey()
   const sync = useSync()
+  const sdk = useSDK()
   const navigate = useNavigate()
   const [expanded, setExpanded] = createSignal(false)
   const [now, setNow] = createSignal(Date.now())
   const requestedFallbackSessions = new Set<string>()
+  const requestedChildren = new Set<string>()
 
   const rootSession = createMemo(() =>
     resolveRootSession(route.params.id, (sessionID) => sync.session.get(sessionID)),
@@ -118,6 +122,36 @@ export function SessionBackgroundTaskDock() {
       requestedFallbackSessions.add(sessionID)
       void sync.session.sync(sessionID).catch(() => undefined)
     }
+  })
+
+  createEffect(() => {
+    const root = rootSession()
+    if (!root) return
+    const missingTasks = messageFallbackTasks().filter((task) => !task.sessionId)
+    if (missingTasks.length === 0) return
+    const requestKey = `${root.id}:${missingTasks.map((task) => task.description).sort().join("|")}`
+    if (requestedChildren.has(requestKey)) return
+    requestedChildren.add(requestKey)
+    void sdk.client.session
+      .children({ sessionID: root.id, directory: sdk.directory })
+      .then((result) => {
+        const children = result.data ?? []
+        if (children.length === 0) {
+          requestedChildren.delete(requestKey)
+          return
+        }
+        sync.set("session", (sessions: Session[]) => {
+          const merged = new Map(sessions.map((session) => [session.id, session] as const))
+          for (const child of children) {
+            if (!child?.id) continue
+            merged.set(child.id, child)
+          }
+          return [...merged.values()].sort((left, right) => left.id.localeCompare(right.id))
+        })
+      })
+      .catch(() => {
+        requestedChildren.delete(requestKey)
+      })
   })
 
   const openTaskSession = (task: BackgroundTaskSnapshot) => {

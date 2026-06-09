@@ -601,6 +601,66 @@ describe("background task metadata parser", () => {
     })
   })
 
+  test("infers child session model for running task tools without metadata", () => {
+    const tasks = deriveMessageFallbackBackgroundTasks({
+      rootSessionId: "ses_root",
+      sessions: [
+        {
+          id: "ses_root",
+          title: "Root session",
+          time: { created: Date.parse("2026-06-06T00:00:00.000Z"), updated: Date.parse("2026-06-06T00:05:00.000Z") },
+        },
+        {
+          id: "ses_child",
+          parentID: "ses_root",
+          title: "Provider filesystem core (@Sisyphus-Junior subagent)",
+          agent: "Sisyphus-Junior",
+          model: JSON.stringify({ id: "gpt-5.5", providerID: "openai", variant: "medium" }),
+          time: { created: Date.parse("2026-06-06T00:01:01.000Z"), updated: Date.parse("2026-06-06T00:01:30.000Z") },
+        },
+      ] as any,
+      statuses: {},
+      messages: {
+        ses_root: [
+          {
+            id: "msg_user",
+            role: "user",
+            time: { created: Date.parse("2026-06-06T00:01:00.000Z") },
+          },
+          {
+            id: "msg_assistant",
+            role: "assistant",
+            parentID: "msg_user",
+            time: { created: Date.parse("2026-06-06T00:01:00.500Z") },
+          },
+        ] as any,
+      },
+      parts: {
+        msg_assistant: [
+          {
+            id: "prt_task",
+            type: "tool",
+            tool: "task",
+            state: {
+              status: "running",
+              input: { description: "Provider filesystem core" },
+              time: { start: Date.parse("2026-06-06T00:01:01.000Z") },
+            },
+          },
+        ] as any,
+      },
+      now: Date.parse("2026-06-06T00:01:20.000Z"),
+    })
+
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0]).toMatchObject({
+      sessionId: "ses_child",
+      agent: "Sisyphus-Junior",
+      status: "running",
+      model: { providerID: "openai", modelID: "gpt-5.5", variant: "medium" },
+    })
+  })
+
   test("hides stale running task rows when the child session has no live status", () => {
     const tasks = deriveMessageFallbackBackgroundTasks({
       rootSessionId: "ses_root",

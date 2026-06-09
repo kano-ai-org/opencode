@@ -9,7 +9,11 @@ import { usePermission } from "@/context/permission"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { isQuestionRequestActive, sessionPermissionRequest, sessionQuestionRequest } from "./session-request-tree"
-import { todoState } from "./session-composer-state.logic"
+import {
+  isPermissionRequestNotFoundError,
+  removePermissionRequest,
+  todoState,
+} from "./session-composer-state.logic"
 
 const idle = { type: "idle" as const }
 
@@ -73,6 +77,12 @@ export function createSessionComposerState(options?: { closeMs?: number | (() =>
     sdk.client.permission
       .respond({ sessionID: perm.sessionID, permissionID: perm.id, response })
       .catch((err: unknown) => {
+        if (isPermissionRequestNotFoundError(err, perm.id)) {
+          sync.set("permission", perm.sessionID, (requests: PermissionRequest[] | undefined) =>
+            removePermissionRequest(requests, perm.id),
+          )
+          return
+        }
         const description = err instanceof Error ? err.message : String(err)
         showToast({ title: language.t("common.requestFailed"), description })
       })
