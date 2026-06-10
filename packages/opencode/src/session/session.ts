@@ -499,6 +499,7 @@ export interface Interface {
   }) => Effect.Effect<MessageV2.Part | undefined>
   readonly updatePart: <T extends MessageV2.Part>(part: T) => Effect.Effect<T>
   readonly cleanupRuntimeToolParts: (input?: { sessionID?: SessionID }) => Effect.Effect<number>
+  readonly staleRuntimeToolRoots: (input: StaleRuntimeToolInput) => Effect.Effect<StaleRuntimeToolRoot[]>
   readonly updatePartDelta: (input: {
     sessionID: SessionID
     messageID: MessageID
@@ -518,6 +519,21 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Se
 export const use = serviceUse(Service)
 
 export type Patch = Types.DeepMutable<SyncEvent.Event<typeof Event.Updated>["data"]["info"]>
+
+export type StaleRuntimeToolInput = {
+  now?: number
+  defaultTimeoutMs: number
+  graceMs: number
+}
+
+export type StaleRuntimeToolRoot = {
+  rootSessionID: SessionID
+  sessionID: SessionID
+  partID: PartID
+  tool: string
+  ageMs: number
+  timeoutMs: number
+}
 
 const db = <T>(fn: (d: Parameters<typeof Database.use>[0] extends (trx: infer D) => any ? D : never) => T) =>
   Effect.sync(() => Database.use(fn))
@@ -560,6 +576,24 @@ function interruptedToolPart(part: MessageV2.ToolPart): MessageV2.ToolPart {
   }
 }
 
+function runtimeToolTimeoutMs(part: MessageV2.ToolPart, defaultTimeoutMs: number, graceMs: number) {
+  const timeout = Number(part.state.input.timeout)
+  if (part.tool === "bash" && Number.isFinite(timeout) && timeout >= 0) return timeout + graceMs
+  return defaultTimeoutMs
+}
+
+function rootOf(sessionID: SessionID, parents: Map<SessionID, SessionID | undefined>) {
+  let current = sessionID
+  const seen = new Set<SessionID>()
+  while (true) {
+    if (seen.has(current)) return current
+    seen.add(current)
+    const parent = parents.get(current)
+    if (!parent) return current
+    current = parent
+  }
+}
+
 export const layer: Layer.Layer<
   Service,
   never,
@@ -598,6 +632,50 @@ export const layer: Layer.Layer<
           .all(),
       )
       return rows.map((row) => hydratePart(row.part)).filter((part): part is MessageV2.ToolPart => part.type === "tool")
+    })
+
+    const staleRuntimeToolRoots = Effect.fn("Session.staleRuntimeToolRoots")(function* (input: StaleRuntimeToolInput) {
+      const ctx = yield* InstanceState.context
+      const now = input.now ?? Date.now()
+      const sessions = yield* db((d) =>
+        d
+          .select({ id: SessionTable.id, parentID: SessionTable.parent_id })
+          .from(SessionTable)
+          .where(eq(SessionTable.project_id, ctx.project.id))
+          .all(),
+      )
+      const parents = new Map(sessions.map((session) => [session.id, session.parentID ?? undefined]))
+      const rows = yield* db((d) =>
+        d
+          .select({ part: PartTable, updated: PartTable.time_updated })
+          .from(PartTable)
+          .innerJoin(SessionTable, eq(PartTable.session_id, SessionTable.id))
+          .where(and(eq(SessionTable.project_id, ctx.project.id), runtimeToolPartCondition()))
+          .all(),
+      )
+
+      const stale: StaleRuntimeToolRoot[] = []
+      const seenRoots = new Set<SessionID>()
+      for (const row of rows) {
+        const part = hydratePart(row.part)
+        if (part.type !== "tool") continue
+        const timeoutMs = runtimeToolTimeoutMs(part, input.defaultTimeoutMs, input.graceMs)
+        const ageMs = now - row.updated
+        if (ageMs <= timeoutMs) continue
+
+        const rootSessionID = rootOf(part.sessionID, parents)
+        if (seenRoots.has(rootSessionID)) continue
+        seenRoots.add(rootSessionID)
+        stale.push({
+          rootSessionID,
+          sessionID: part.sessionID,
+          partID: part.id,
+          tool: part.tool,
+          ageMs,
+          timeoutMs,
+        })
+      }
+      return stale
     })
 
     const sessionTree = Effect.fn("Session.sessionTree")(function* (sessionID: SessionID) {
@@ -975,6 +1053,7 @@ export const layer: Layer.Layer<
       updatePart,
       getPart,
       cleanupRuntimeToolParts,
+      staleRuntimeToolRoots,
       updatePartDelta,
       findMessage,
     })

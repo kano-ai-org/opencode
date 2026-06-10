@@ -308,6 +308,30 @@ describe("RuntimeFlags", () => {
     { name: "absent", config: {}, expected: undefined },
     {
       name: "valid positive integer",
+      config: { OPENCODE_RUNTIME_TOOL_WATCHDOG_INTERVAL_MS: "1234" },
+      expected: 1234,
+    },
+    { name: "zero disables", config: { OPENCODE_RUNTIME_TOOL_WATCHDOG_INTERVAL_MS: "0" }, expected: 0 },
+    { name: "negative", config: { OPENCODE_RUNTIME_TOOL_WATCHDOG_INTERVAL_MS: "-1" }, expected: undefined },
+    {
+      name: "non-integer",
+      config: { OPENCODE_RUNTIME_TOOL_WATCHDOG_INTERVAL_MS: "1.5" },
+      expected: undefined,
+    },
+  ]) {
+    it.effect(`parses runtimeToolWatchdogIntervalMs from config: ${input.name}`, () =>
+      Effect.gen(function* () {
+        const flags = yield* readFlags.pipe(Effect.provide(fromConfig(input.config)))
+
+        expect(flags.runtimeToolWatchdogIntervalMs).toBe(input.expected)
+      }),
+    )
+  }
+
+  for (const input of [
+    { name: "absent", config: {}, expected: undefined },
+    {
+      name: "valid positive integer",
       config: { OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX: "1234" },
       expected: 1234,
     },

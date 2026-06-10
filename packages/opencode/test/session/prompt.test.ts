@@ -22,7 +22,7 @@ import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Question } from "../../src/question"
 import { Todo } from "../../src/session/todo"
 import { Session } from "@/session/session"
-import { SessionMessageTable } from "../../src/session/session.sql"
+import { PartTable, SessionMessageTable } from "../../src/session/session.sql"
 import { LLM } from "../../src/session/llm"
 import { MessageV2 } from "../../src/session/message-v2"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -548,6 +548,60 @@ noLLMServer.instance(
         expect(childTool.state.metadata?.interrupted).toBe(true)
         expect(childTool.state.error).toBe("Tool execution was interrupted")
       }
+    }),
+  { config: cfg },
+)
+
+noLLMServer.instance(
+  "stale runtime tool roots resolve child shell timeout to root session",
+  () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const parent = yield* sessions.create({ title: "Parent" })
+      const child = yield* sessions.create({ parentID: parent.id, title: "Child" })
+      const childSeed = yield* seed(child.id)
+      const childPartID = PartID.ascending()
+      const now = Date.now()
+
+      yield* sessions.updatePart({
+        id: childPartID,
+        messageID: childSeed.assistant.id,
+        sessionID: child.id,
+        type: "tool",
+        callID: "child-call",
+        tool: "bash",
+        state: {
+          status: "running",
+          input: {
+            command: "sleep 10",
+            timeout: 1_000,
+            description: "Sleeps too long",
+          },
+          metadata: { output: "" },
+          time: { start: now - 2_000 },
+        },
+      })
+      yield* Effect.sync(() => {
+        Database.use((db) =>
+          db
+            .update(PartTable)
+            .set({ time_updated: now - 2_000 })
+            .where(Database.eq(PartTable.id, childPartID))
+            .run(),
+        )
+      })
+
+      const stale = yield* sessions.staleRuntimeToolRoots({
+        now,
+        defaultTimeoutMs: 60_000,
+        graceMs: 100,
+      })
+
+      expect(stale).toHaveLength(1)
+      expect(stale[0]?.rootSessionID).toBe(parent.id)
+      expect(stale[0]?.sessionID).toBe(child.id)
+      expect(stale[0]?.partID).toBe(childPartID)
+      expect(stale[0]?.tool).toBe("bash")
     }),
   { config: cfg },
 )
