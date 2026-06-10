@@ -486,6 +486,72 @@ it.instance("loop exits without an LLM request for interrupted orphan tool calls
   }),
 )
 
+noLLMServer.instance(
+  "cancel marks stale running tools interrupted across child sessions",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const parent = yield* sessions.create({ title: "Parent" })
+      const child = yield* sessions.create({ parentID: parent.id, title: "Child" })
+      const parentSeed = yield* seed(parent.id)
+      const childSeed = yield* seed(child.id)
+      const parentPartID = PartID.ascending()
+      const childPartID = PartID.ascending()
+
+      yield* sessions.updatePart({
+        id: parentPartID,
+        messageID: parentSeed.assistant.id,
+        sessionID: parent.id,
+        type: "tool",
+        callID: "parent-call",
+        tool: "task",
+        state: {
+          status: "running",
+          input: { description: "child work" },
+          metadata: { sessionId: child.id },
+          time: { start: 1 },
+        },
+      })
+      yield* sessions.updatePart({
+        id: childPartID,
+        messageID: childSeed.assistant.id,
+        sessionID: child.id,
+        type: "tool",
+        callID: "child-call",
+        tool: "read",
+        state: {
+          status: "running",
+          input: { filePath: "fixture.env" },
+          time: { start: 2 },
+        },
+      })
+
+      yield* prompt.cancel(parent.id)
+
+      const parentMessages = yield* sessions.messages({ sessionID: parent.id })
+      const childMessages = yield* sessions.messages({ sessionID: child.id })
+      const parentTool = parentMessages
+        .flatMap((message) => message.parts)
+        .find((part): part is MessageV2.ToolPart => part.id === parentPartID && part.type === "tool")
+      const childTool = childMessages
+        .flatMap((message) => message.parts)
+        .find((part): part is MessageV2.ToolPart => part.id === childPartID && part.type === "tool")
+
+      expect(parentTool?.state.status).toBe("error")
+      expect(childTool?.state.status).toBe("error")
+      if (parentTool?.state.status === "error") {
+        expect(parentTool.state.metadata?.interrupted).toBe(true)
+        expect(parentTool.state.metadata?.sessionId).toBe(child.id)
+      }
+      if (childTool?.state.status === "error") {
+        expect(childTool.state.metadata?.interrupted).toBe(true)
+        expect(childTool.state.error).toBe("Tool execution was interrupted")
+      }
+    }),
+  { config: cfg },
+)
+
 it.instance("loop calls LLM and returns assistant message", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)

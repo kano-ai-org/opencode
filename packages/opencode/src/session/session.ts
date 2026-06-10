@@ -498,6 +498,7 @@ export interface Interface {
     partID: PartID
   }) => Effect.Effect<MessageV2.Part | undefined>
   readonly updatePart: <T extends MessageV2.Part>(part: T) => Effect.Effect<T>
+  readonly cleanupRuntimeToolParts: (input?: { sessionID?: SessionID }) => Effect.Effect<number>
   readonly updatePartDelta: (input: {
     sessionID: SessionID
     messageID: MessageID
@@ -521,6 +522,44 @@ export type Patch = Types.DeepMutable<SyncEvent.Event<typeof Event.Updated>["dat
 const db = <T>(fn: (d: Parameters<typeof Database.use>[0] extends (trx: infer D) => any ? D : never) => T) =>
   Effect.sync(() => Database.use(fn))
 
+function hydratePart(row: typeof PartTable.$inferSelect): MessageV2.Part {
+  return {
+    ...row.data,
+    id: row.id,
+    sessionID: row.session_id,
+    messageID: row.message_id,
+  } as MessageV2.Part
+}
+
+function runtimeToolPartCondition(): SQL {
+  return and(
+    sql`json_extract(${PartTable.data}, '$.type') = 'tool'`,
+    sql`json_extract(${PartTable.data}, '$.state.status') in ('pending', 'running')`,
+  )!
+}
+
+function interruptedToolPart(part: MessageV2.ToolPart): MessageV2.ToolPart {
+  const now = Date.now()
+  const metadata = part.state.status === "running" ? part.state.metadata : undefined
+  return {
+    ...part,
+    state: {
+      status: "error",
+      input: part.state.input,
+      error: "Tool execution was interrupted",
+      metadata: {
+        ...metadata,
+        interrupted: true,
+        output: "[Tool execution was interrupted]",
+      },
+      time: {
+        start: part.state.status === "running" ? part.state.time.start : now,
+        end: now,
+      },
+    },
+  }
+}
+
 export const layer: Layer.Layer<
   Service,
   never,
@@ -533,6 +572,59 @@ export const layer: Layer.Layer<
     const storage = yield* Storage.Service
     const sync = yield* SyncEvent.Service
     const flags = yield* RuntimeFlags.Service
+
+    const runtimeToolPartsForSessions = Effect.fn("Session.runtimeToolPartsForSessions")(function* (
+      sessionIDs: SessionID[],
+    ) {
+      if (sessionIDs.length === 0) return [] as MessageV2.ToolPart[]
+      const rows = yield* db((d) =>
+        d
+          .select()
+          .from(PartTable)
+          .where(and(inArray(PartTable.session_id, sessionIDs), runtimeToolPartCondition()))
+          .all(),
+      )
+      return rows.map(hydratePart).filter((part): part is MessageV2.ToolPart => part.type === "tool")
+    })
+
+    const runtimeToolPartsForProject = Effect.fn("Session.runtimeToolPartsForProject")(function* () {
+      const ctx = yield* InstanceState.context
+      const rows = yield* db((d) =>
+        d
+          .select({ part: PartTable })
+          .from(PartTable)
+          .innerJoin(SessionTable, eq(PartTable.session_id, SessionTable.id))
+          .where(and(eq(SessionTable.project_id, ctx.project.id), runtimeToolPartCondition()))
+          .all(),
+      )
+      return rows.map((row) => hydratePart(row.part)).filter((part): part is MessageV2.ToolPart => part.type === "tool")
+    })
+
+    const sessionTree = Effect.fn("Session.sessionTree")(function* (sessionID: SessionID) {
+      const visited = new Set<SessionID>()
+      const queue: SessionID[] = [sessionID]
+      while (queue.length > 0) {
+        const current = queue.shift()
+        if (!current || visited.has(current)) continue
+        visited.add(current)
+        const kids = yield* children(current).pipe(Effect.catch(() => Effect.succeed([] as Info[])))
+        queue.push(...kids.map((child) => child.id))
+      }
+      return [...visited]
+    })
+
+    const cleanupRuntimeToolParts = Effect.fn("Session.cleanupRuntimeToolParts")(function* (input?: {
+      sessionID?: SessionID
+    }) {
+      const parts = input?.sessionID
+        ? yield* runtimeToolPartsForSessions(yield* sessionTree(input.sessionID))
+        : yield* runtimeToolPartsForProject()
+      for (const part of parts) {
+        yield* updatePart(interruptedToolPart(part))
+      }
+      if (parts.length > 0) log.warn("marked stale runtime tool parts interrupted", { count: parts.length })
+      return parts.length
+    })
 
     const createNext = Effect.fn("Session.createNext")(function* (input: {
       id?: SessionID
@@ -662,12 +754,7 @@ export const layer: Layer.Layer<
           .get(),
       )
       if (!row) return
-      return {
-        ...row.data,
-        id: row.id,
-        sessionID: row.session_id,
-        messageID: row.message_id,
-      } as MessageV2.Part
+      return hydratePart(row)
     })
 
     const create = Effect.fn("Session.create")(function* (input?: {
@@ -859,6 +946,12 @@ export const layer: Layer.Layer<
       return Option.none<MessageV2.WithParts>()
     })
 
+    const hasInstance = yield* InstanceState.context.pipe(
+      Effect.as(true),
+      Effect.catchCause(() => Effect.succeed(false)),
+    )
+    if (hasInstance) yield* cleanupRuntimeToolParts()
+
     return Service.of({
       list,
       create,
@@ -881,6 +974,7 @@ export const layer: Layer.Layer<
       removePart,
       updatePart,
       getPart,
+      cleanupRuntimeToolParts,
       updatePartDelta,
       findMessage,
     })

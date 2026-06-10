@@ -140,6 +140,7 @@ export const layer = Layer.effect(
     const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
       yield* elog.info("cancel", { sessionID })
       yield* state.cancel(sessionID)
+      yield* sessions.cleanupRuntimeToolParts({ sessionID })
     })
 
     const resolvePromptParts = Effect.fn("SessionPrompt.resolvePromptParts")(function* (template: string) {
