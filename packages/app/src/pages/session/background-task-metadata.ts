@@ -502,9 +502,14 @@ function backgroundTaskBatchCompletedAt(tasks: BackgroundTaskSnapshot[]): number
   return latest
 }
 
-function shouldRetainFallbackTaskBatch(tasks: BackgroundTaskSnapshot[], now: number): boolean {
+function shouldRetainFallbackTaskBatch(
+  tasks: BackgroundTaskSnapshot[],
+  now: number,
+  options?: { parentResponseOpen?: boolean },
+): boolean {
   if (tasks.length === 0) return false
   if (tasks.some((task) => isActiveBackgroundTask(task))) return true
+  if (options?.parentResponseOpen && tasks.some((task) => task.status !== "completed" && !!task.error)) return true
 
   const completedAt = backgroundTaskBatchCompletedAt(tasks)
   if (completedAt === undefined) return false
@@ -705,6 +710,8 @@ function parseToolBackgroundSnapshot(input: {
     && /Background (?:agent )?task launched/i.test(output)
   const reviewRunning = !!output
     && /Review agents are running in the background/i.test(output)
+  const silentFailure = !!output
+    && /No assistant response found \(task ran in background mode\)|No assistant or tool response found|Session completed but no new response was generated|No assistant text output found/i.test(output)
   const childState = sessionId
     ? deriveSessionState({
         sessionId,
@@ -725,6 +732,7 @@ function parseToolBackgroundSnapshot(input: {
   if (childState?.status && terminalStatuses.has(childState.status)) status = childState.status
   else if (part.state.status === "running") status = "running"
   else if (part.state.status === "error") status = "error"
+  else if (silentFailure) status = "error"
   else if (childState?.status) status = childState.status
   else if (reviewRunning) status = "running"
   else if (launchedInBackground) status = parseToolOutputStatus(output) ?? "pending"
@@ -747,12 +755,18 @@ function parseToolBackgroundSnapshot(input: {
       : undefined)
   const retryCount = childState?.retryCount ?? 0
   const progress = childState?.progress
-    ?? (launchedInBackground || reviewRunning
+    ?? (launchedInBackground || reviewRunning || silentFailure
       ? {
           toolCalls: 0,
-          ...(launchedInBackground ? { lastMessage: "launched" } : {}),
+          ...(silentFailure
+            ? { lastMessage: "empty response" }
+            : launchedInBackground
+              ? { lastMessage: "launched" }
+              : {}),
         }
       : undefined)
+  const error = childState?.error
+    ?? (silentFailure ? truncateMessage(output, 220) : undefined)
 
   return {
     id: backgroundTaskId ?? metadataTaskId ?? sessionId ?? `part:${input.message.id}:${part.id}`,
@@ -772,7 +786,7 @@ function parseToolBackgroundSnapshot(input: {
     retryCount,
     ...(progress ? { progress } : {}),
     attempts: [],
-    ...(childState?.error ? { error: childState.error } : {}),
+    ...(error ? { error } : {}),
   }
 }
 
@@ -941,7 +955,12 @@ export function deriveMessageFallbackBackgroundTasks(input: {
           now,
         })
         if (tasks.length === 0) continue
-        return shouldRetainFallbackTaskBatch(tasks, now) ? tasks : []
+        const parentResponseOpen = sessionMessages.some((message) =>
+          message.role === "assistant"
+          && message.parentID === userMessageId
+          && typeof message.time.completed !== "number"
+        )
+        return shouldRetainFallbackTaskBatch(tasks, now, { parentResponseOpen }) ? tasks : []
       }
 
       return []

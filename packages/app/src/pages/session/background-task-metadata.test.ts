@@ -799,6 +799,90 @@ describe("background task metadata parser", () => {
     expect(tasks).toEqual([])
   })
 
+  test("surfaces empty supervised task output while the parent response remains open", () => {
+    const tasks = deriveMessageFallbackBackgroundTasks({
+      rootSessionId: "ses_root",
+      sessions: [
+        {
+          id: "ses_root",
+          title: "Root session",
+          time: { created: Date.parse("2026-06-06T00:00:00.000Z"), updated: Date.parse("2026-06-06T00:30:00.000Z") },
+        },
+        {
+          id: "ses_child",
+          parentID: "ses_root",
+          title: "Execute Task 6B (@Sisyphus-Junior subagent)",
+          model: { id: "MiniMax-M3", providerID: "minimax", variant: "medium" },
+          time: { created: Date.parse("2026-06-06T00:00:10.000Z"), updated: Date.parse("2026-06-06T00:00:10.000Z") },
+        },
+      ] as any,
+      statuses: {},
+      messages: {
+        ses_root: [
+          {
+            id: "msg_user",
+            role: "user",
+            time: { created: Date.parse("2026-06-06T00:00:00.000Z") },
+          },
+          {
+            id: "msg_task",
+            role: "assistant",
+            parentID: "msg_user",
+            time: {
+              created: Date.parse("2026-06-06T00:00:05.000Z"),
+              completed: Date.parse("2026-06-06T00:00:20.000Z"),
+            },
+          },
+          {
+            id: "msg_waiting",
+            role: "assistant",
+            parentID: "msg_user",
+            time: { created: Date.parse("2026-06-06T00:01:00.000Z") },
+          },
+        ] as any,
+      },
+      parts: {
+        msg_task: [
+          {
+            id: "prt_empty",
+            type: "tool",
+            tool: "task",
+            state: {
+              status: "completed",
+              metadata: {
+                backgroundTaskId: "bg_empty",
+                sessionId: "ses_child",
+                taskId: "ses_child",
+                agent: "Sisyphus-Junior",
+                category: "deep",
+                description: "Execute Task 6B",
+                model: { providerID: "minimax", modelID: "MiniMax-M3", variant: "medium" },
+              },
+              output:
+                "No assistant response found (task ran in background mode).\n\nSession ID: ses_child",
+              time: {
+                start: Date.parse("2026-06-06T00:00:05.000Z"),
+                end: Date.parse("2026-06-06T00:00:20.000Z"),
+              },
+            },
+          },
+        ] as any,
+      },
+      now: Date.parse("2026-06-06T00:30:00.000Z"),
+    })
+
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0]).toMatchObject({
+      id: "bg_empty",
+      sessionId: "ses_child",
+      agent: "Sisyphus-Junior",
+      status: "error",
+      model: { providerID: "minimax", modelID: "MiniMax-M3", variant: "medium" },
+      progress: { lastMessage: "empty response" },
+    })
+    expect(tasks[0]?.error).toContain("No assistant response found")
+  })
+
   test("hides stale completed message-derived batches after retention", () => {
     const tasks = deriveMessageFallbackBackgroundTasks({
       rootSessionId: "ses_root",
