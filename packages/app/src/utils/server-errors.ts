@@ -16,6 +16,14 @@ export type ProviderModelNotFoundError = {
   }
 }
 
+export type ServerMessageError = {
+  name: string
+  data: {
+    message: string
+    ref?: string
+  }
+}
+
 type Translator = (key: string, vars?: Record<string, string | number>) => string
 
 function tr(translator: Translator | undefined, key: string, text: string, vars?: Record<string, string | number>) {
@@ -29,6 +37,7 @@ export function formatServerError(error: unknown, translate?: Translator, fallba
   const unwrapped = unwrapNamedError(error)
   if (isConfigInvalidErrorLike(unwrapped)) return parseReadableConfigInvalidError(unwrapped, translate)
   if (isProviderModelNotFoundErrorLike(unwrapped)) return parseReadableProviderModelNotFoundError(unwrapped, translate)
+  if (isServerMessageErrorLike(unwrapped)) return parseReadableServerMessageError(unwrapped)
   if (error instanceof Error && error.message) return error.message
   if (typeof error === "string" && error) return error
   if (fallback) return fallback
@@ -52,6 +61,20 @@ function isProviderModelNotFoundErrorLike(error: unknown): error is ProviderMode
   if (typeof error !== "object" || error === null) return false
   const o = error as Record<string, unknown>
   return o.name === "ProviderModelNotFoundError" && typeof o.data === "object" && o.data !== null
+}
+
+function isServerMessageErrorLike(error: unknown): error is ServerMessageError {
+  if (typeof error !== "object" || error === null) return false
+  const o = error as Record<string, unknown>
+  if (typeof o.name !== "string" || typeof o.data !== "object" || o.data === null) return false
+  const data = o.data as Record<string, unknown>
+  return typeof data.message === "string" && data.message.trim().length > 0
+}
+
+function parseReadableServerMessageError(errorInput: ServerMessageError) {
+  const message = errorInput.data.message.trim()
+  const ref = errorInput.data.ref?.trim()
+  return ref ? `${message} (${ref})` : message
 }
 
 export function parseReadableConfigInvalidError(errorInput: ConfigInvalidError, translator?: Translator) {

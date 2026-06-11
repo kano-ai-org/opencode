@@ -34,7 +34,7 @@ import {
   SummarizePayload,
   UpdatePayload,
 } from "../groups/session"
-import { PermissionNotFoundError } from "../errors"
+import { PermissionNotFoundError, UnknownError } from "../errors"
 import * as SessionError from "./session-errors"
 
 const tryParseJson = (text: string) =>
@@ -42,6 +42,38 @@ const tryParseJson = (text: string) =>
     try: () => JSON.parse(text) as unknown,
     catch: () => new HttpApiError.BadRequest({}),
   })
+
+const commandFailureFallback = "Command failed before the session message was created."
+const commandFailureLimit = 1200
+
+function readFailureMessage(input: unknown) {
+  if (typeof input === "string") return input
+  if (input instanceof Error) {
+    const errorData = (input as Error & { data?: unknown }).data
+    if (typeof errorData === "object" && errorData !== null) {
+      const dataMessage = (errorData as Record<string, unknown>).message
+      if (typeof dataMessage === "string") return dataMessage
+    }
+    return input.message
+  }
+  if (typeof input === "object" && input !== null) {
+    const record = input as Record<string, unknown>
+    if (typeof record.message === "string") return record.message
+    if (typeof record.data === "object" && record.data !== null) {
+      const dataMessage = (record.data as Record<string, unknown>).message
+      if (typeof dataMessage === "string") return dataMessage
+    }
+  }
+}
+
+function formatCommandFailureMessage(cause: Cause.Cause<unknown>) {
+  const die = cause.reasons.find(Cause.isDieReason)
+  const fail = cause.reasons.find(Cause.isFailReason)
+  const message = readFailureMessage(die?.defect) ?? readFailureMessage(fail?.error) ?? commandFailureFallback
+  const trimmed = message.trim() || commandFailureFallback
+  if (trimmed.length <= commandFailureLimit) return trimmed
+  return `${trimmed.slice(0, commandFailureLimit)}...`
+}
 
 export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", (handlers) =>
   Effect.gen(function* () {
@@ -334,7 +366,31 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       yield* requireSession(ctx.params.sessionID)
       return yield* promptSvc
         .command({ ...ctx.payload, sessionID: ctx.params.sessionID })
-        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+        .pipe(
+          Effect.catchCauseIf(
+            (cause) => cause.reasons.some(Cause.isDieReason),
+            (cause) => {
+              const message = formatCommandFailureMessage(cause)
+              return Effect.gen(function* () {
+                yield* Effect.logError("session command failed").pipe(
+                  Effect.annotateLogs({
+                    sessionID: ctx.params.sessionID,
+                    command: ctx.payload.command,
+                    cause: Cause.pretty(cause),
+                  }),
+                )
+                yield* bus
+                  .publish(Session.Event.Error, {
+                    sessionID: ctx.params.sessionID,
+                    error: new NamedError.Unknown({ message }).toObject(),
+                  })
+                  .pipe(Effect.ignore)
+                return yield* Effect.fail(new UnknownError({ message }))
+              })
+            },
+          ),
+          Effect.mapError((error) => (error instanceof UnknownError ? error : new HttpApiError.BadRequest({}))),
+        )
     })
 
     const shell = Effect.fn("SessionHttpApi.shell")(function* (ctx: {

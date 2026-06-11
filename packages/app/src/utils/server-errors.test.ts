@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { ConfigInvalidError, ProviderModelNotFoundError } from "./server-errors"
+import type { ConfigInvalidError, ProviderModelNotFoundError, ServerMessageError } from "./server-errors"
 import { formatServerError, parseReadableConfigInvalidError } from "./server-errors"
 
 function fill(text: string, vars?: Record<string, string | number>) {
@@ -100,6 +100,18 @@ describe("formatServerError", () => {
     )
   })
 
+  test("formats generic server message errors", () => {
+    const error = {
+      name: "UnknownError",
+      data: {
+        message: "Command not found: typo",
+        ref: "err_123",
+      },
+    } satisfies ServerMessageError
+
+    expect(formatServerError(error, language.t)).toBe("Command not found: typo (err_123)")
+  })
+
   test("formats provider model errors using provider/model", () => {
     const error = {
       name: "ProviderModelNotFoundError",
@@ -140,5 +152,18 @@ describe("formatServerError", () => {
     const wrapped = new Error("ConfigInvalidError", { cause: { body, status: 400 } })
 
     expect(formatServerError(wrapped, language.t)).toBe("Arquivo de config em config invalido: Missing host")
+  })
+
+  test("unwraps SDK-wrapped generic server message errors", () => {
+    const body = {
+      name: "UnknownError",
+      data: {
+        message: "Agent not found: missing-agent",
+      },
+    } satisfies ServerMessageError
+
+    const wrapped = new Error("UnknownError", { cause: { body, status: 500 } })
+
+    expect(formatServerError(wrapped, language.t)).toBe("Agent not found: missing-agent")
   })
 })
