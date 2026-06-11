@@ -635,13 +635,11 @@ export const layer: Layer.Layer<
     })
 
     const staleRuntimeToolRoots = Effect.fn("Session.staleRuntimeToolRoots")(function* (input: StaleRuntimeToolInput) {
-      const ctx = yield* InstanceState.context
       const now = input.now ?? Date.now()
       const sessions = yield* db((d) =>
         d
           .select({ id: SessionTable.id, parentID: SessionTable.parent_id })
           .from(SessionTable)
-          .where(eq(SessionTable.project_id, ctx.project.id))
           .all(),
       )
       const parents = new Map(sessions.map((session) => [session.id, session.parentID ?? undefined]))
@@ -650,7 +648,7 @@ export const layer: Layer.Layer<
           .select({ part: PartTable, updated: PartTable.time_updated })
           .from(PartTable)
           .innerJoin(SessionTable, eq(PartTable.session_id, SessionTable.id))
-          .where(and(eq(SessionTable.project_id, ctx.project.id), runtimeToolPartCondition()))
+          .where(runtimeToolPartCondition())
           .all(),
       )
 

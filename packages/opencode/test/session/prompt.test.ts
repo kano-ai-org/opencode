@@ -22,7 +22,9 @@ import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Question } from "../../src/question"
 import { Todo } from "../../src/session/todo"
 import { Session } from "@/session/session"
-import { PartTable, SessionMessageTable } from "../../src/session/session.sql"
+import { PartTable, SessionMessageTable, SessionTable } from "../../src/session/session.sql"
+import { ProjectTable } from "../../src/project/project.sql"
+import { ProjectID } from "../../src/project/schema"
 import { LLM } from "../../src/session/llm"
 import { MessageV2 } from "../../src/session/message-v2"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -602,6 +604,84 @@ noLLMServer.instance(
       expect(stale[0]?.sessionID).toBe(child.id)
       expect(stale[0]?.partID).toBe(childPartID)
       expect(stale[0]?.tool).toBe("bash")
+    }),
+  { config: cfg },
+)
+
+noLLMServer.instance(
+  "stale runtime tool roots include stale tools outside the current project",
+  () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const current = yield* sessions.create({ title: "Current" })
+      const foreign = yield* sessions.create({ title: "Foreign" })
+      const currentSeed = yield* seed(current.id)
+      const foreignSeed = yield* seed(foreign.id)
+      const currentPartID = PartID.ascending()
+      const foreignPartID = PartID.ascending()
+      const now = Date.now()
+      const staleUpdated = now - 2_000
+      const foreignProjectID = ProjectID.make("foreign-runtime-tool-project")
+
+      yield* sessions.updatePart({
+        id: currentPartID,
+        messageID: currentSeed.assistant.id,
+        sessionID: current.id,
+        type: "tool",
+        callID: "current-call",
+        tool: "read",
+        state: {
+          status: "running",
+          input: { filePath: "current.txt" },
+          time: { start: staleUpdated },
+        },
+      })
+      yield* sessions.updatePart({
+        id: foreignPartID,
+        messageID: foreignSeed.assistant.id,
+        sessionID: foreign.id,
+        type: "tool",
+        callID: "foreign-call",
+        tool: "read",
+        state: {
+          status: "running",
+          input: { filePath: "foreign.txt" },
+          time: { start: staleUpdated },
+        },
+      })
+
+      yield* Effect.sync(() => {
+        Database.use((db) => {
+          db.insert(ProjectTable)
+            .values({
+              id: foreignProjectID,
+              worktree: "/tmp/foreign-runtime-tool-project",
+              sandboxes: [],
+              time_created: staleUpdated,
+              time_updated: staleUpdated,
+            })
+            .run()
+          db.update(SessionTable)
+            .set({ project_id: foreignProjectID })
+            .where(Database.eq(SessionTable.id, foreign.id))
+            .run()
+          db.update(PartTable)
+            .set({ time_updated: staleUpdated })
+            .where(Database.inArray(PartTable.id, [currentPartID, foreignPartID]))
+            .run()
+        })
+      })
+
+      const stale = yield* sessions.staleRuntimeToolRoots({
+        now,
+        defaultTimeoutMs: 1_000,
+        graceMs: 100,
+      })
+
+      const rootIDs = new Set(stale.map((item) => item.rootSessionID))
+      expect(rootIDs.has(current.id)).toBe(true)
+      expect(rootIDs.has(foreign.id)).toBe(true)
+      expect(stale.find((item) => item.rootSessionID === foreign.id)?.partID).toBe(foreignPartID)
     }),
   { config: cfg },
 )
