@@ -6,6 +6,7 @@ import {
   clearSessionPrefetch,
   getSessionPrefetch,
   getSessionPrefetchPromise,
+  hasUsableSessionMessageCache,
   setSessionPrefetch,
 } from "./global-sync/session-prefetch"
 import { createServerSyncContext } from "./server-sync"
@@ -461,7 +462,12 @@ export const createDirSyncContext = (directory: string, serverSync: ReturnType<t
           }
 
           const hasSession = Binary.search(store.session, sessionID, (s) => s.id).found
-          const cached = store.message[sessionID] !== undefined && meta.limit[key] !== undefined
+          const cached =
+            meta.limit[key] !== undefined &&
+            hasUsableSessionMessageCache({
+              message: store.message[sessionID],
+              complete: meta.complete[key],
+            })
           if (cached && hasSession && !opts?.force) return
 
           const limit = meta.limit[key] ?? initialMessagePageSize
@@ -557,12 +563,27 @@ export const createDirSyncContext = (directory: string, serverSync: ReturnType<t
           return meta.loading[key] ?? false
         },
         async loadMore(sessionID: string, count?: number) {
-          const [, setStore] = serverSync.child(directory)
+          const [store, setStore] = serverSync.child(directory)
           touch(directory, setStore, sessionID)
           const key = keyFor(directory, sessionID)
           const step = count ?? historyMessagePageSize
           if (meta.loading[key]) return
           if (meta.complete[key]) return
+          if (
+            !hasUsableSessionMessageCache({
+              message: store.message[sessionID],
+              complete: meta.complete[key],
+            })
+          ) {
+            await loadMessages({
+              directory,
+              client,
+              setStore,
+              sessionID,
+              limit: initialMessagePageSize,
+            })
+            return
+          }
           const before = meta.cursor[key]
           if (!before) return
 

@@ -3,6 +3,7 @@ import {
   clearSessionPrefetch,
   clearSessionPrefetchDirectory,
   getSessionPrefetch,
+  hasUsableSessionMessageCache,
   runSessionPrefetch,
   setSessionPrefetch,
   shouldSkipSessionPrefetch,
@@ -92,5 +93,12 @@ describe("session prefetch", () => {
         now: 1 + 15_001,
       }),
     ).toBe(true)
+  })
+
+  test("rejects empty incomplete message cache", () => {
+    expect(hasUsableSessionMessageCache({ message: undefined })).toBe(false)
+    expect(hasUsableSessionMessageCache({ message: [], complete: false })).toBe(false)
+    expect(hasUsableSessionMessageCache({ message: [], complete: true })).toBe(true)
+    expect(hasUsableSessionMessageCache({ message: [{}], complete: false })).toBe(true)
   })
 })

@@ -33,7 +33,11 @@ import { checksum } from "@opencode-ai/core/util/encode"
 import { useLocation, useSearchParams } from "@solidjs/router"
 import { NewSessionDesignView, NewSessionView, SessionHeader } from "@/components/session"
 import { useComments } from "@/context/comments"
-import { getSessionPrefetch, SESSION_PREFETCH_TTL } from "@/context/global-sync/session-prefetch"
+import {
+  getSessionPrefetch,
+  hasUsableSessionMessageCache,
+  SESSION_PREFETCH_TTL,
+} from "@/context/global-sync/session-prefetch"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
@@ -631,7 +635,13 @@ export default function Page() {
       refreshTimer = undefined
       if (!id) return
 
-      const cached = untrack(() => sync.data.message[id] !== undefined)
+      const cached = untrack(() => {
+        const info = getSessionPrefetch(directory, id)
+        return hasUsableSessionMessageCache({
+          message: sync.data.message[id],
+          complete: info?.complete,
+        })
+      })
       const stale = !cached
         ? false
         : (() => {

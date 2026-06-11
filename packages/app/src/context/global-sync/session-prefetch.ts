@@ -9,6 +9,12 @@ type Meta = {
   at: number
 }
 
+export function hasUsableSessionMessageCache(input: { message: readonly unknown[] | undefined; complete?: boolean }) {
+  if (input.message === undefined) return false
+  if (input.message.length > 0) return true
+  return input.complete === true
+}
+
 export function shouldSkipSessionPrefetch(input: { message: boolean; info?: Meta; chunk: number; now?: number }) {
   if (input.message) {
     if (!input.info) return true
