@@ -803,6 +803,8 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
         return Object.fromEntries(WIDELY_SUPPORTED_EFFORTS.map((effort) => [effort, { reasoningEffort: effort }]))
       }
       const copilotEfforts = iife(() => {
+        // Copilot's GPT/Codex models use OpenAI-style reasoning controls, but
+        // support a smaller published set than the direct OpenAI provider.
         if (id.includes("5.1-codex-max") || id.includes("5.2") || id.includes("5.3"))
           return [...WIDELY_SUPPORTED_EFFORTS, "xhigh"]
         const arr = [...WIDELY_SUPPORTED_EFFORTS]

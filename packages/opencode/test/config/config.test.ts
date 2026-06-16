@@ -676,6 +676,53 @@ it.instance("treats agent variant as model-scoped setting (not provider option)"
   }),
 )
 
+it.instance("maps legacy agent reasoningEffort to model variant", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    yield* writeConfigEffect(test.directory, {
+      $schema: "https://opencode.ai/config.json",
+      agent: {
+        test_agent: {
+          model: "openai/gpt-5.5",
+          reasoningEffort: "high",
+          textVerbosity: "medium",
+        },
+      },
+    })
+    const config = yield* Config.use.get()
+    const agent = config.agent?.["test_agent"]
+
+    expect(agent?.variant).toBe("high")
+    expect(agent?.options).toMatchObject({
+      reasoningEffort: "high",
+      textVerbosity: "medium",
+    })
+  }),
+)
+
+it.instance("keeps explicit agent variant over legacy reasoningEffort", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    yield* writeConfigEffect(test.directory, {
+      $schema: "https://opencode.ai/config.json",
+      agent: {
+        test_agent: {
+          model: "openai/gpt-5.5",
+          variant: "xhigh",
+          reasoningEffort: "low",
+        },
+      },
+    })
+    const config = yield* Config.use.get()
+    const agent = config.agent?.["test_agent"]
+
+    expect(agent?.variant).toBe("xhigh")
+    expect(agent?.options).toMatchObject({
+      reasoningEffort: "low",
+    })
+  }),
+)
+
 it.instance("handles command configuration", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance
