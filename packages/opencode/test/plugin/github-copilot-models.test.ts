@@ -446,6 +446,49 @@ test("clears existing variants so refreshed models calculate provider-specific v
   expect(models["claude-opus-4.7"].variants).toBeUndefined()
 })
 
+test("merges local GPT/Codex effort variants when Copilot endpoint omits xhigh", async () => {
+  globalThis.fetch = mock(() =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              model_picker_enabled: true,
+              id: "gpt-5.3-codex",
+              name: "GPT-5.3 Codex",
+              version: "gpt-5.3-codex-2026-02-05",
+              capabilities: {
+                family: "gpt",
+                limits: {
+                  max_context_window_tokens: 128000,
+                  max_output_tokens: 64000,
+                  max_prompt_tokens: 128000,
+                },
+                supports: {
+                  reasoning_effort: ["low", "medium", "high"],
+                  streaming: true,
+                  tool_calls: true,
+                },
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    ),
+  ) as unknown as typeof fetch
+
+  const result = await CopilotModels.get("https://api.githubcopilot.com")
+  const models = result.models
+
+  expect(Object.keys(models["gpt-5.3-codex"].variants ?? {})).toEqual(["low", "medium", "high", "xhigh"])
+  expect(models["gpt-5.3-codex"].variants?.xhigh).toEqual({
+    reasoningEffort: "xhigh",
+    reasoningSummary: "auto",
+    include: ["reasoning.encrypted_content"],
+  })
+})
+
 test("remaps fallback oauth model urls to the enterprise host", async () => {
   globalThis.fetch = mock(() => Promise.reject(new Error("timeout"))) as unknown as typeof fetch
 
@@ -473,6 +516,23 @@ test("remaps fallback oauth model urls to the enterprise host", async () => {
             url: "https://api.githubcopilot.com/v1",
             npm: "@ai-sdk/anthropic",
           },
+          capabilities: { reasoning: false },
+        },
+        "gpt-5.3-codex": {
+          id: "gpt-5.3-codex",
+          providerID: "github-copilot",
+          api: {
+            id: "gpt-5.3-codex",
+            url: "https://api.githubcopilot.com",
+            npm: "@ai-sdk/openai-compatible",
+          },
+          capabilities: { reasoning: true },
+          release_date: "2026-02-05",
+          variants: {
+            low: { reasoningEffort: "low" },
+            medium: { reasoningEffort: "medium" },
+            high: { reasoningEffort: "high" },
+          },
         },
       },
     } as never,
@@ -489,4 +549,5 @@ test("remaps fallback oauth model urls to the enterprise host", async () => {
 
   expect(models.claude.api.url).toBe("https://copilot-api.ghe.example.com")
   expect(models.claude.api.npm).toBe("@ai-sdk/github-copilot")
+  expect(Object.keys(models["gpt-5.3-codex"].variants ?? {})).toEqual(["low", "medium", "high", "xhigh"])
 })

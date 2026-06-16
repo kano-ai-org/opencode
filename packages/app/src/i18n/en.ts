@@ -911,6 +911,11 @@ export const dict = {
   "settings.general.row.shell.description": "Shell used by the terminal and agent tools",
   "settings.general.row.shell.autoDefault": "Auto (Default)",
   "settings.general.row.shell.terminalOnly": "terminal only",
+  "settings.general.row.modelConfigPreset.title": "Model config preset",
+  "settings.general.row.modelConfigPreset.description":
+    "Switch the active oh-my-openagent model combination without restarting the server",
+  "settings.general.row.modelConfigPreset.toast.applied.title": "Model config switched",
+  "settings.general.row.modelConfigPreset.toast.applied.description": "Now using {{preset}}",
   "settings.general.row.appearance.title": "Appearance",
   "settings.general.row.appearance.description": "Customise how OpenCode looks on your device",
   "settings.general.row.colorScheme.title": "Color scheme",
