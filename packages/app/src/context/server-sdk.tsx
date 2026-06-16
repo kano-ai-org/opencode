@@ -174,6 +174,7 @@ type ServerSDKBase = {
   client: ReturnType<typeof createSdkForServer>
   api: CompatibleApi
   currentApi: ServerApi
+  request: (input: string, init?: RequestInit) => Promise<Response>
   event: {
     on: ServerEventEmitter["on"]
     listen: ServerEventEmitter["listen"]
@@ -347,6 +348,17 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
       directory,
     })
   const api = createCompatibleApi({ protocol, current: currentApi, legacy })
+  const request = (input: string, init?: RequestInit) => {
+    const url = new URL(input, server.http.url)
+    const headers = new Headers(init?.headers)
+    if (server.http.password) {
+      headers.set("Authorization", `Basic ${btoa(`${server.http.username ?? "opencode"}:${server.http.password}`)}`)
+    }
+    return (platform.fetch ?? fetch)(url, {
+      ...init,
+      headers,
+    })
+  }
 
   return {
     server,
@@ -357,6 +369,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
     client: sdk,
     api,
     currentApi,
+    request,
     event: {
       on: emitter.on.bind(emitter),
       listen: emitter.listen.bind(emitter),

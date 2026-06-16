@@ -1,4 +1,4 @@
-import { Component, Show, createMemo, createResource, onMount, type JSX } from "solid-js"
+import { Component, Show, createMemo, createResource, createSignal, onMount, type JSX } from "solid-js"
 import { Button } from "@opencode-ai/ui/button"
 import { Icon } from "@opencode-ai/ui/icon"
 import { Select } from "@opencode-ai/ui/select"
@@ -9,6 +9,7 @@ import { Tag } from "@opencode-ai/ui/v2/badge-v2"
 import { useTheme, type ColorScheme } from "@opencode-ai/ui/theme/context"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useParams } from "@solidjs/router"
+import { useQueryClient } from "@tanstack/solid-query"
 import { useLanguage } from "@/context/language"
 import { usePermission } from "@/context/permission"
 import { usePlatform, type DisplayBackend } from "@/context/platform"
@@ -29,6 +30,7 @@ import {
 } from "@/context/settings"
 import { decode64 } from "@/utils/base64"
 import { playSoundById, SOUND_OPTIONS } from "@/utils/sound"
+import { showToast } from "@/utils/toast"
 import { Link } from "./link"
 import { SettingsList } from "./settings-list"
 
@@ -53,6 +55,26 @@ type ShellSelectOption = {
   id: string
   value: string
   label: string
+}
+
+type ModelConfigPreset = {
+  id: string
+  name: string
+  filename: string
+  active: boolean
+}
+
+type ModelConfigPresetList = {
+  active?: string
+  presets: ModelConfigPreset[]
+}
+
+const emptyModelConfigPresets: ModelConfigPresetList = { presets: [] }
+
+async function readServerJson<T>(response: Response): Promise<T> {
+  if (response.ok) return response.json() as Promise<T>
+  const text = await response.text().catch(() => "")
+  throw new Error(text || response.statusText || `HTTP ${response.status}`)
 }
 
 // To prevent audio from overlapping/playing very quickly when navigating the settings menus,
@@ -92,6 +114,7 @@ export const SettingsGeneral: Component = () => {
   const settings = useSettings()
 
   const updater = useUpdaterAction()
+  const [applyingModelConfigPreset, setApplyingModelConfigPreset] = createSignal(false)
 
   const linux = createMemo(() => platform.platform === "desktop" && platform.os === "linux")
   const dir = createMemo(() => decode64(params.dir))
@@ -125,6 +148,16 @@ export const SettingsGeneral: Component = () => {
 
   const serverSync = useServerSync()
   const serverSdk = useServerSDK()
+  const queryClient = useQueryClient()
+
+  const [modelConfigPresets, { mutate: setModelConfigPresets, refetch: refetchModelConfigPresets }] = createResource(
+    () =>
+      serverSdk()
+        .request("/global/config/presets")
+        .then((response) => readServerJson<ModelConfigPresetList>(response))
+        .catch(() => emptyModelConfigPresets),
+    { initialValue: emptyModelConfigPresets },
+  )
 
   const [shells] = createResource(
     async () => {
@@ -155,6 +188,11 @@ export const SettingsGeneral: Component = () => {
 
   const autoOption = { id: "auto", value: "", label: language.t("settings.general.row.shell.autoDefault") }
   const currentShell = createMemo(() => serverSync().data.config.shell ?? "")
+  const modelConfigPresetOptions = createMemo(() => modelConfigPresets().presets)
+  const activeModelConfigPreset = createMemo(() => {
+    const data = modelConfigPresets()
+    return data.presets.find((preset) => preset.id === data.active) ?? data.presets.find((preset) => preset.active)
+  })
 
   const shellOptions = createMemo<ShellSelectOption[]>(() => {
     const list = shells.latest
@@ -186,6 +224,45 @@ export const SettingsGeneral: Component = () => {
 
     return options
   })
+
+  const applyModelConfigPreset = (option: ModelConfigPreset | undefined) => {
+    if (!option) return
+    if (option.id === activeModelConfigPreset()?.id) return
+    if (applyingModelConfigPreset()) return
+
+    setApplyingModelConfigPreset(true)
+    void serverSdk()
+      .request("/global/config/presets/apply", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: option.id }),
+      })
+      .then((response) => readServerJson<ModelConfigPresetList>(response))
+      .then((next) => {
+        setModelConfigPresets(next)
+        void queryClient.invalidateQueries({ queryKey: ["config"] })
+        void queryClient.invalidateQueries({
+          predicate: (query) => {
+            const key = query.queryKey
+            return key[1] === "providers" || key[1] === "agents"
+          },
+        })
+        showToast({
+          variant: "success",
+          icon: "circle-check",
+          title: language.t("settings.general.row.modelConfigPreset.toast.applied.title"),
+          description: language.t("settings.general.row.modelConfigPreset.toast.applied.description", {
+            preset: option.name,
+          }),
+        })
+      })
+      .catch((err: unknown) => {
+        void refetchModelConfigPresets()
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ variant: "error", title: language.t("common.requestFailed"), description: message })
+      })
+      .finally(() => setApplyingModelConfigPreset(false))
+  }
 
   const onDisplayBackendChange = (checked: boolean) => {
     const update = platform.setDisplayBackend?.(checked ? "wayland" : "auto")
@@ -345,6 +422,27 @@ export const SettingsGeneral: Component = () => {
             triggerStyle={{ "min-width": "180px" }}
           />
         </SettingsRow>
+
+        <Show when={modelConfigPresetOptions().length > 0}>
+          <SettingsRow
+            title={language.t("settings.general.row.modelConfigPreset.title")}
+            description={language.t("settings.general.row.modelConfigPreset.description")}
+          >
+            <Select
+              data-action="settings-model-config-preset"
+              options={modelConfigPresetOptions()}
+              current={activeModelConfigPreset()}
+              value={(o) => o.id}
+              label={(o) => o.name}
+              onSelect={applyModelConfigPreset}
+              disabled={applyingModelConfigPreset()}
+              variant="secondary"
+              size="small"
+              triggerVariant="settings"
+              triggerStyle={{ "min-width": "180px" }}
+            />
+          </SettingsRow>
+        </Show>
 
         <SettingsRow
           title={language.t("settings.general.row.reasoningSummaries.title")}
