@@ -1,5 +1,7 @@
 import type { Model } from "@opencode-ai/sdk/v2"
 import { Option, Schema } from "effect"
+import type { Model as ProviderModel } from "@/provider/provider"
+import { ProviderTransform } from "@/provider/transform"
 
 const item = Schema.Struct({
   model_picker_enabled: Schema.Boolean,
@@ -146,7 +148,13 @@ function build(key: string, remote: SelectableItem, url: string, prev?: Model): 
   }
 
   const efforts = remote.capabilities.supports.reasoning_effort
-  const variants: NonNullable<Model["variants"]> = {}
+  // The Copilot endpoint can omit newer GPT/Codex efforts such as xhigh even
+  // when the model accepts them. Seed from local provider rules, then let the
+  // live endpoint override any effort it explicitly reports.
+  const variants: NonNullable<Model["variants"]> =
+    !isMsgApi && model.api.npm === "@ai-sdk/github-copilot"
+      ? { ...ProviderTransform.variants(model as ProviderModel) }
+      : {}
   if (!isMsgApi && efforts?.length) {
     efforts.forEach((effort) => {
       variants[effort] = {
