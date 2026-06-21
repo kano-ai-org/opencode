@@ -444,6 +444,13 @@ export const dict = {
   "wsl.onboarding.desktopVersion": "桌面版 {{version}}",
   "wsl.onboarding.versionMismatch": "已安装版本与桌面应用版本不一致。",
   "wsl.onboarding.adding": "正在添加...",
+  "settings.servers.section.workspaceSync": "工作区同步",
+  "settings.servers.workspaceSync.title": "启动工作区同步",
+  "settings.servers.workspaceSync.description": "为当前项目中的活动会话启动同步循环。",
+  "settings.servers.workspaceSync.button": "同步工作区",
+  "settings.servers.workspaceSync.button.busy": "同步中...",
+  "settings.servers.workspaceSync.toast.started.title": "已启动工作区同步",
+  "settings.servers.workspaceSync.toast.started.description": "活动项目会话正在后台同步。",
 
   "dialog.project.edit.title": "编辑项目",
   "dialog.project.edit.name": "名称",
