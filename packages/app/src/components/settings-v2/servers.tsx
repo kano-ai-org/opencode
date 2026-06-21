@@ -3,29 +3,38 @@ import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
 import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { useParams } from "@solidjs/router"
 import fuzzysort from "fuzzysort"
-import { type Component, For, Show, createMemo } from "solid-js"
+import { type Component, For, Show, createMemo, createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import { ServerRowMenu } from "@/components/server/server-row-menu"
 import { ServerHealthIndicator } from "@/components/server/server-row"
 import { useLanguage } from "@/context/language"
 import { ServerConnection, serverName } from "@/context/server"
+import { useServerSDK } from "@/context/server-sdk"
+import { decode64 } from "@/utils/base64"
+import { showToast } from "@/utils/toast"
 import { useServerManagementController } from "../dialog-select-server"
 import { DialogServerV2 } from "./dialog-server-v2"
 import { SettingsListV2 } from "./parts/list"
+import { SettingsRowV2 } from "./parts/row"
 import { AddServerMenu, isWslServer, useFilteredWslServers, WslServerSettings } from "@/wsl/settings"
 import "./settings-v2.css"
 
 export const SettingsServersV2: Component = () => {
   const dialog = useDialog()
   const language = useLanguage()
+  const serverSdk = useServerSDK()
+  const params = useParams()
   const controller = useServerManagementController()
   const [store, setStore] = createStore({ filter: "" })
+  const [syncingWorkspaces, setSyncingWorkspaces] = createSignal(false)
   const wslServers = useFilteredWslServers(() => store.filter)
 
   const showSearch = createMemo(
     () => controller.sortedItems().filter((item) => !isWslServer(item)).length + wslServers().length > 1,
   )
+  const dir = createMemo(() => decode64(params.dir))
 
   const filtered = createMemo(() => {
     const items = controller.sortedItems().filter((item) => !isWslServer(item))
@@ -44,6 +53,32 @@ export const SettingsServersV2: Component = () => {
 
   const openEdit = (server: ServerConnection.Http) => {
     dialog.push(() => <DialogServerV2 mode="edit" server={server} />)
+  }
+
+  const startWorkspaceSync = () => {
+    if (syncingWorkspaces()) return
+    setSyncingWorkspaces(true)
+    const directory = dir()
+    void serverSdk()
+      .request(directory ? `/sync/start?directory=${encodeURIComponent(directory)}` : "/sync/start", { method: "POST" })
+      .then(async (response) => {
+        if (response.ok) return
+        const text = await response.text().catch(() => "")
+        throw new Error(text || response.statusText || `HTTP ${response.status}`)
+      })
+      .then(() => {
+        showToast({
+          variant: "success",
+          icon: "circle-check",
+          title: language.t("settings.servers.workspaceSync.toast.started.title"),
+          description: language.t("settings.servers.workspaceSync.toast.started.description"),
+        })
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ variant: "error", title: language.t("common.requestFailed"), description: message })
+      })
+      .finally(() => setSyncingWorkspaces(false))
   }
 
   return (
@@ -85,6 +120,28 @@ export const SettingsServersV2: Component = () => {
       </div>
 
       <div class="settings-v2-tab-body settings-v2-servers">
+        <div class="settings-v2-section">
+          <h3 class="settings-v2-section-title">{language.t("settings.servers.section.workspaceSync")}</h3>
+          <SettingsListV2>
+            <SettingsRowV2
+              title={language.t("settings.servers.workspaceSync.title")}
+              description={language.t("settings.servers.workspaceSync.description")}
+            >
+              <ButtonV2
+                variant="neutral"
+                icon="status"
+                onClick={startWorkspaceSync}
+                disabled={syncingWorkspaces()}
+                data-action="settings-workspace-sync-start"
+              >
+                {syncingWorkspaces()
+                  ? language.t("settings.servers.workspaceSync.button.busy")
+                  : language.t("settings.servers.workspaceSync.button")}
+              </ButtonV2>
+            </SettingsRowV2>
+          </SettingsListV2>
+        </div>
+
         <Show
           when={filtered().length > 0 || wslServers().length > 0}
           fallback={
