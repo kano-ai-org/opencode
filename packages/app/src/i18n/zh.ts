@@ -354,6 +354,13 @@ export const dict = {
   "dialog.server.menu.delete": "删除",
   "dialog.server.current": "当前服务器",
   "dialog.server.status.default": "默认",
+  "settings.servers.section.workspaceSync": "工作区同步",
+  "settings.servers.workspaceSync.title": "启动工作区同步",
+  "settings.servers.workspaceSync.description": "为当前项目中的活动会话启动同步循环。",
+  "settings.servers.workspaceSync.button": "同步工作区",
+  "settings.servers.workspaceSync.button.busy": "同步中...",
+  "settings.servers.workspaceSync.toast.started.title": "已启动工作区同步",
+  "settings.servers.workspaceSync.toast.started.description": "活动项目会话正在后台同步。",
 
   "dialog.project.edit.title": "编辑项目",
   "dialog.project.edit.name": "名称",
