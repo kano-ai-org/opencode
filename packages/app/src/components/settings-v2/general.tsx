@@ -1,12 +1,15 @@
-import { Component, Show, createMemo, createResource } from "solid-js"
+import { Component, Show, createMemo, createResource, createSignal } from "solid-js"
 import { createMediaQuery } from "@solid-primitives/media"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
 import { Switch } from "@opencode-ai/ui/v2/switch-v2"
 import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { useQueryClient } from "@tanstack/solid-query"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
+import { useServerSDK } from "@/context/server-sdk"
+import { showToast } from "@/utils/toast"
 import { useUpdaterAction } from "../updater-action"
 import { useSettings } from "@/context/settings"
 import { ExternalLink } from "../external-link"
@@ -51,6 +54,26 @@ const fontSettings = {
     input: "setTerminal",
   },
 } as const
+
+type ModelConfigPreset = {
+  id: string
+  name: string
+  filename: string
+  active: boolean
+}
+
+type ModelConfigPresetList = {
+  active?: string
+  presets: ModelConfigPreset[]
+}
+
+const emptyModelConfigPresets: ModelConfigPresetList = { presets: [] }
+
+async function readServerJson<T>(response: Response): Promise<T> {
+  if (response.ok) return response.json() as Promise<T>
+  const text = await response.text().catch(() => "")
+  throw new Error(text || response.statusText || `HTTP ${response.status}`)
+}
 const soundSettings = {
   agent: {
     action: "settings-sounds-agent",
@@ -278,13 +301,68 @@ export const SettingsGeneralV2: Component<{
   const platform = usePlatform()
   const dialog = useDialog()
   const settings = useSettings()
+  const serverSdk = useServerSDK()
+  const queryClient = useQueryClient()
   const mobile = createMediaQuery("(max-width: 767px)")
   const updater = useUpdaterAction()
+  const [applyingModelConfigPreset, setApplyingModelConfigPreset] = createSignal(false)
   const permissionScope = createPermissionScopeController(() => props.sessionID)
   const shell = createShellSettingsController()
   const appearance = createAppearanceSettingsController()
   const sounds = createSoundSettingsController()
   const desktop = createMemo(() => platform.platform === "desktop")
+
+  const [modelConfigPresets, { mutate: setModelConfigPresets, refetch: refetchModelConfigPresets }] = createResource(
+    () =>
+      serverSdk()
+        .request("/global/config/presets")
+        .then((response) => readServerJson<ModelConfigPresetList>(response))
+        .catch(() => emptyModelConfigPresets),
+    { initialValue: emptyModelConfigPresets },
+  )
+
+  const modelConfigPresetOptions = createMemo(() => modelConfigPresets().presets)
+  const activeModelConfigPreset = createMemo(() => {
+    const data = modelConfigPresets()
+    return data.presets.find((preset) => preset.id === data.active) ?? data.presets.find((preset) => preset.active)
+  })
+
+  const applyModelConfigPreset = (option: ModelConfigPreset | null) => {
+    if (!option || option.id === activeModelConfigPreset()?.id || applyingModelConfigPreset()) return
+
+    setApplyingModelConfigPreset(true)
+    void serverSdk()
+      .request("/global/config/presets/apply", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: option.id }),
+      })
+      .then((response) => readServerJson<ModelConfigPresetList>(response))
+      .then((next) => {
+        setModelConfigPresets(next)
+        void queryClient.invalidateQueries({ queryKey: ["config"] })
+        void queryClient.invalidateQueries({
+          predicate: (query) => {
+            const key = query.queryKey
+            return key[1] === "providers" || key[1] === "agents"
+          },
+        })
+        showToast({
+          variant: "success",
+          icon: "circle-check",
+          title: language.t("settings.general.row.modelConfigPreset.toast.applied.title"),
+          description: language.t("settings.general.row.modelConfigPreset.toast.applied.description", {
+            preset: option.name,
+          }),
+        })
+      })
+      .catch((err: unknown) => {
+        void refetchModelConfigPresets()
+        const message = err instanceof Error ? err.message : String(err)
+        showToast({ variant: "error", title: language.t("common.requestFailed"), description: message })
+      })
+      .finally(() => setApplyingModelConfigPreset(false))
+  }
 
   const [pinchZoom, { mutate: setPinchZoom }] = createResource(
     () => desktop() && "getPinchZoomEnabled" in platform,
@@ -332,6 +410,26 @@ export const SettingsGeneralV2: Component<{
         <PermissionScopeSetting controller={permissionScope} />
 
         <ShellSetting controller={shell} />
+
+        <Show when={modelConfigPresetOptions().length > 0}>
+          <SettingsRowV2
+            title={language.t("settings.general.row.modelConfigPreset.title")}
+            description={language.t("settings.general.row.modelConfigPreset.description")}
+          >
+            <SelectV2
+              appearance="inline"
+              data-action="settings-model-config-preset"
+              options={modelConfigPresetOptions()}
+              current={activeModelConfigPreset()}
+              placement="bottom-end"
+              gutter={6}
+              value={(option) => option.id}
+              label={(option) => option.name}
+              onSelect={applyModelConfigPreset}
+              disabled={applyingModelConfigPreset()}
+            />
+          </SettingsRowV2>
+        </Show>
 
         <SettingsRowV2
           title={language.t("settings.general.row.reasoningSummaries.title")}
