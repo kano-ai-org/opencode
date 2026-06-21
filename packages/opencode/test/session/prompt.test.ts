@@ -26,7 +26,8 @@ import { Image } from "../../src/image/image"
 import { Question } from "../../src/question"
 import { Todo } from "../../src/session/todo"
 import { Session } from "@/session/session"
-import { SessionMessageTable } from "@opencode-ai/core/session/sql"
+import { PartTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { LLM } from "../../src/session/llm"
 import { MessageV2 } from "../../src/session/message-v2"
 import { FSUtil } from "@opencode-ai/core/fs-util"
@@ -57,6 +58,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/location-services"
+import { ProjectV2 } from "@opencode-ai/core/project"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -487,6 +489,159 @@ it.instance("loop exits without an LLM request for interrupted orphan tool calls
     expect(result.info.id).toBe(seeded.assistant.id)
     expect(yield* llm.hits).toHaveLength(0)
   }),
+)
+
+noLLMServer.instance(
+  "cancel marks stale running tools interrupted across child sessions",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const parent = yield* sessions.create({ title: "Parent" })
+      const child = yield* sessions.create({ parentID: parent.id, title: "Child" })
+      const parentSeed = yield* seed(parent.id)
+      const childSeed = yield* seed(child.id)
+      const parentPartID = PartID.ascending()
+      const childPartID = PartID.ascending()
+
+      yield* sessions.updatePart({
+        id: parentPartID,
+        messageID: parentSeed.assistant.id,
+        sessionID: parent.id,
+        type: "tool",
+        callID: "parent-call",
+        tool: "task",
+        state: {
+          status: "running",
+          input: { description: "child work" },
+          metadata: { sessionId: child.id },
+          time: { start: 1 },
+        },
+      })
+      yield* sessions.updatePart({
+        id: childPartID,
+        messageID: childSeed.assistant.id,
+        sessionID: child.id,
+        type: "tool",
+        callID: "child-call",
+        tool: "read",
+        state: {
+          status: "running",
+          input: { filePath: "fixture.env" },
+          time: { start: 2 },
+        },
+      })
+
+      yield* prompt.cancel(parent.id)
+
+      const parentMessages = yield* sessions.messages({ sessionID: parent.id })
+      const childMessages = yield* sessions.messages({ sessionID: child.id })
+      const parentTool = parentMessages
+        .flatMap((message) => message.parts)
+        .find((part): part is SessionV1.ToolPart => part.id === parentPartID && part.type === "tool")
+      const childTool = childMessages
+        .flatMap((message) => message.parts)
+        .find((part): part is SessionV1.ToolPart => part.id === childPartID && part.type === "tool")
+
+      expect(parentTool?.state.status).toBe("error")
+      expect(childTool?.state.status).toBe("error")
+      if (parentTool?.state.status === "error") {
+        expect(parentTool.state.metadata?.interrupted).toBe(true)
+        expect(parentTool.state.metadata?.sessionId).toBe(child.id)
+      }
+      if (childTool?.state.status === "error") {
+        expect(childTool.state.metadata?.interrupted).toBe(true)
+        expect(childTool.state.error).toBe("Tool execution was interrupted")
+      }
+    }),
+  { config: cfg },
+)
+
+noLLMServer.instance(
+  "stale runtime tool roots include stale tools outside the current project",
+  () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const current = yield* sessions.create({ title: "Current" })
+      const foreign = yield* sessions.create({ title: "Foreign" })
+      const currentSeed = yield* seed(current.id)
+      const foreignSeed = yield* seed(foreign.id)
+      const currentPartID = PartID.ascending()
+      const foreignPartID = PartID.ascending()
+      const now = Date.now()
+      const staleUpdated = now - 2_000
+      const foreignProjectID = ProjectV2.ID.make("foreign-runtime-tool-project")
+
+      yield* sessions.updatePart({
+        id: currentPartID,
+        messageID: currentSeed.assistant.id,
+        sessionID: current.id,
+        type: "tool",
+        callID: "current-call",
+        tool: "read",
+        state: {
+          status: "running",
+          input: { filePath: "current.txt" },
+          time: { start: staleUpdated },
+        },
+      })
+      yield* sessions.updatePart({
+        id: foreignPartID,
+        messageID: foreignSeed.assistant.id,
+        sessionID: foreign.id,
+        type: "tool",
+        callID: "foreign-call",
+        tool: "read",
+        state: {
+          status: "running",
+          input: { filePath: "foreign.txt" },
+          time: { start: staleUpdated },
+        },
+      })
+
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: foreignProjectID,
+          worktree: "/tmp/foreign-runtime-tool-project" as (typeof ProjectTable.$inferInsert)["worktree"],
+          sandboxes: [] as (typeof ProjectTable.$inferInsert)["sandboxes"],
+          time_created: staleUpdated,
+          time_updated: staleUpdated,
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .update(SessionTable)
+        .set({ project_id: foreignProjectID })
+        .where(eq(SessionTable.id, foreign.id))
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .update(PartTable)
+        .set({ time_updated: staleUpdated })
+        .where(eq(PartTable.id, currentPartID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .update(PartTable)
+        .set({ time_updated: staleUpdated })
+        .where(eq(PartTable.id, foreignPartID))
+        .run()
+        .pipe(Effect.orDie)
+
+      const stale = yield* sessions.staleRuntimeToolRoots({
+        now,
+        defaultTimeoutMs: 1_000,
+        graceMs: 100,
+      })
+
+      const rootIDs = new Set(stale.map((item) => item.rootSessionID))
+      expect(rootIDs.has(current.id)).toBe(true)
+      expect(rootIDs.has(foreign.id)).toBe(true)
+      expect(stale.find((item) => item.rootSessionID === foreign.id)?.partID).toBe(foreignPartID)
+    }),
+  { config: cfg },
 )
 
 it.instance("loop calls LLM and returns assistant message", () =>

@@ -340,6 +340,13 @@ export const dict = {
   "dialog.server.menu.delete": "刪除",
   "dialog.server.current": "目前伺服器",
   "dialog.server.status.default": "預設",
+  "settings.servers.section.workspaceSync": "工作區同步",
+  "settings.servers.workspaceSync.title": "啟動工作區同步",
+  "settings.servers.workspaceSync.description": "為目前專案中的作用中工作階段啟動同步循環。",
+  "settings.servers.workspaceSync.button": "同步工作區",
+  "settings.servers.workspaceSync.button.busy": "同步中...",
+  "settings.servers.workspaceSync.toast.started.title": "已啟動工作區同步",
+  "settings.servers.workspaceSync.toast.started.description": "作用中專案工作階段正在背景同步。",
 
   "dialog.project.edit.title": "編輯專案",
   "dialog.project.edit.name": "名稱",
