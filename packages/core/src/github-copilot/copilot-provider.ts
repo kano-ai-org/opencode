@@ -5,6 +5,8 @@ import { OpenAIResponsesLanguageModel } from "./responses/openai-responses-langu
 
 // Import the version or define it
 const VERSION = "0.1.0"
+const API_VERSION = "2026-06-01"
+const INTEGRATION_ID = "vscode-chat"
 
 export type OpenaiCompatibleModelId = string
 
@@ -60,6 +62,8 @@ export function createOpenaiCompatible(options: OpenaiCompatibleProviderSettings
   const headers = {
     // Default OpenAI Compatible headers (can be overridden by user)
     ...(options.apiKey && { Authorization: `Bearer ${options.apiKey}` }),
+    "X-GitHub-Api-Version": API_VERSION,
+    "Copilot-Integration-Id": INTEGRATION_ID,
     ...options.headers,
   }
 
