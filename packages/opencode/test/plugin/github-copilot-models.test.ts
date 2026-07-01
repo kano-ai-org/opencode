@@ -483,3 +483,110 @@ test("remaps fallback oauth model urls to the enterprise host", async () => {
   expect(models.claude.api.npm).toBe("@ai-sdk/github-copilot")
   expect(Object.keys(models["gpt-5.3-codex"].variants ?? {})).toEqual(["low", "medium", "high", "xhigh"])
 })
+
+test("uses the chat integration when fetching oauth model catalog", async () => {
+  let headers: HeadersInit | undefined
+  globalThis.fetch = mock((_url, init) => {
+    headers = init?.headers
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              model_picker_enabled: true,
+              id: "gpt-5.4",
+              name: "GPT-5.4",
+              version: "gpt-5.4",
+              supported_endpoints: ["/responses"],
+              capabilities: {
+                family: "gpt-5.4",
+                limits: {
+                  max_context_window_tokens: 1050000,
+                  max_output_tokens: 128000,
+                  max_prompt_tokens: 922000,
+                },
+                supports: {
+                  reasoning_effort: ["low", "medium", "high", "xhigh"],
+                  streaming: true,
+                  tool_calls: true,
+                },
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    )
+  }) as unknown as typeof fetch
+
+  const hooks = await CopilotAuthPlugin({
+    client: {} as never,
+    project: {} as never,
+    directory: "",
+    worktree: "",
+    experimental_workspace: {
+      register() {},
+    },
+    serverUrl: new URL("https://example.com"),
+    $: {} as never,
+  })
+
+  const models = await hooks.provider!.models!(
+    {
+      id: "github-copilot",
+      models: {},
+    } as never,
+    {
+      auth: {
+        type: "oauth",
+        refresh: "token",
+        access: "token",
+        expires: Date.now() + 60_000,
+      } as never,
+    },
+  )
+
+  expect(new Headers(headers).get("Copilot-Integration-Id")).toBe("vscode-chat")
+  expect(models["gpt-5.4"]).toBeDefined()
+})
+
+test("uses the chat integration for oauth provider requests", async () => {
+  let headers: HeadersInit | undefined
+  globalThis.fetch = mock((_request, init) => {
+    headers = init?.headers
+    return Promise.resolve(new Response("{}", { status: 200 }))
+  }) as unknown as typeof fetch
+
+  const hooks = await CopilotAuthPlugin({
+    client: {} as never,
+    project: {} as never,
+    directory: "",
+    worktree: "",
+    experimental_workspace: {
+      register() {},
+    },
+    serverUrl: new URL("https://example.com"),
+    $: {} as never,
+  })
+
+  const auth = await hooks.auth!.loader!(() =>
+    Promise.resolve({
+      type: "oauth",
+      refresh: "token",
+      access: "token",
+      expires: Date.now() + 60_000,
+    } as never),
+    {} as never,
+  )
+
+  await auth.fetch!("https://api.githubcopilot.com/responses", {
+    method: "POST",
+    headers: {
+      "x-api-key": "removed",
+    },
+    body: JSON.stringify({ input: "hello" }),
+  })
+
+  expect(new Headers(headers).get("Copilot-Integration-Id")).toBe("vscode-chat")
+  expect(new Headers(headers).get("x-api-key")).toBeNull()
+})
