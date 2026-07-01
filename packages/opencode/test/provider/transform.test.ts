@@ -2784,6 +2784,15 @@ describe("ProviderTransform.temperature - Cohere North", () => {
   })
 })
 
+describe("ProviderTransform sampling defaults - MiniMax M3", () => {
+  test("uses the MiniMax recommended temperature and topP", () => {
+    const model = { id: "minimax/MiniMax-M3" } as any
+
+    expect(ProviderTransform.temperature(model)).toBe(1.0)
+    expect(ProviderTransform.topP(model)).toBe(0.95)
+  })
+})
+
 describe("ProviderTransform.variants", () => {
   const createMockModel = (overrides: Partial<any> = {}): any => ({
     id: "test/test-model",
