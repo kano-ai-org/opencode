@@ -81,7 +81,6 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
             Authorization: `Bearer ${auth.refresh}`,
             "User-Agent": `opencode/${InstallationVersion}`,
             "X-GitHub-Api-Version": API_VERSION,
-            "Copilot-Integration-Id": INTEGRATION_ID,
           },
           provider.models,
         )
@@ -165,21 +164,22 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
               return { isVision: false, isAgent: false }
             })
 
-            const headers: Record<string, string> = {
-              "x-initiator": isAgent ? "agent" : "user",
-              ...(init?.headers as Record<string, string>),
-              "User-Agent": `opencode/${InstallationVersion}`,
-              Authorization: `Bearer ${info.refresh}`,
-              "Openai-Intent": "conversation-edits",
-              "Copilot-Integration-Id": INTEGRATION_ID,
-            }
+            const headers: Record<string, string> = Object.fromEntries(new Headers(init?.headers))
+            delete headers["authorization"]
+            delete headers["copilot-integration-id"]
+            delete headers["x-api-key"]
+            delete headers["x-github-api-version"]
+
+            headers["x-initiator"] = isAgent ? "agent" : "user"
+            headers["User-Agent"] = `opencode/${InstallationVersion}`
+            headers.Authorization = `Bearer ${info.refresh}`
+            headers["Openai-Intent"] = "conversation-edits"
+            headers["X-GitHub-Api-Version"] = API_VERSION
+            headers["Copilot-Integration-Id"] = INTEGRATION_ID
 
             if (isVision) {
               headers["Copilot-Vision-Request"] = "true"
             }
-
-            delete headers["x-api-key"]
-            delete headers["authorization"]
 
             return fetch(request, {
               ...init,

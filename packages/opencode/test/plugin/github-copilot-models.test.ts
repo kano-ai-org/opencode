@@ -552,7 +552,7 @@ test("remaps fallback oauth model urls to the enterprise host", async () => {
   expect(Object.keys(models["gpt-5.3-codex"].variants ?? {})).toEqual(["low", "medium", "high", "xhigh"])
 })
 
-test("uses the chat integration when fetching oauth model catalog", async () => {
+test("does not narrow oauth model catalog to a chat integration", async () => {
   let headers: HeadersInit | undefined
   globalThis.fetch = mock((_url, init) => {
     headers = init?.headers
@@ -561,7 +561,7 @@ test("uses the chat integration when fetching oauth model catalog", async () => 
         JSON.stringify({
           data: [
             {
-              model_picker_enabled: true,
+              model_picker_enabled: false,
               id: "gpt-5.4",
               name: "GPT-5.4",
               version: "gpt-5.4",
@@ -575,6 +575,26 @@ test("uses the chat integration when fetching oauth model catalog", async () => 
                 },
                 supports: {
                   reasoning_effort: ["low", "medium", "high", "xhigh"],
+                  streaming: true,
+                  tool_calls: true,
+                },
+              },
+            },
+            {
+              model_picker_enabled: false,
+              id: "gpt-5.4-nano",
+              name: "GPT-5.4 Nano",
+              version: "gpt-5.4-nano",
+              supported_endpoints: ["/responses"],
+              capabilities: {
+                family: "gpt-5.4",
+                limits: {
+                  max_context_window_tokens: 128000,
+                  max_output_tokens: 32000,
+                  max_prompt_tokens: 128000,
+                },
+                supports: {
+                  reasoning_effort: ["low", "medium"],
                   streaming: true,
                   tool_calls: true,
                 },
@@ -614,8 +634,9 @@ test("uses the chat integration when fetching oauth model catalog", async () => 
     },
   )
 
-  expect(new Headers(headers).get("Copilot-Integration-Id")).toBe("vscode-chat")
+  expect(new Headers(headers).get("Copilot-Integration-Id")).toBeNull()
   expect(models["gpt-5.4"]).toBeDefined()
+  expect(models["gpt-5.4-nano"]).toBeUndefined()
 })
 
 test("uses the chat integration for oauth provider requests", async () => {
@@ -651,10 +672,13 @@ test("uses the chat integration for oauth provider requests", async () => {
     method: "POST",
     headers: {
       "x-api-key": "removed",
+      "copilot-integration-id": "copilot-language-server",
+      "x-github-api-version": "2025-01-01",
     },
     body: JSON.stringify({ input: "hello" }),
   })
 
   expect(new Headers(headers).get("Copilot-Integration-Id")).toBe("vscode-chat")
+  expect(new Headers(headers).get("X-GitHub-Api-Version")).toBe("2026-06-01")
   expect(new Headers(headers).get("x-api-key")).toBeNull()
 })
