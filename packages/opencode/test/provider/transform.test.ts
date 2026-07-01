@@ -3796,6 +3796,15 @@ describe("ProviderTransform sampling defaults - DeepSeek", () => {
   })
 })
 
+describe("ProviderTransform sampling defaults - MiniMax M3", () => {
+  test("uses the MiniMax recommended temperature and topP", () => {
+    const model = { id: "minimax/MiniMax-M3", api: { id: "MiniMax-M3" } } as any
+
+    expect(ProviderTransform.temperature(model)).toBe(1.0)
+    expect(ProviderTransform.topP(model)).toBe(0.95)
+  })
+})
+
 describe("ProviderTransform.reasoningVariants", () => {
   const model = (reasoning_options: ModelsDev.Model["reasoning_options"]) => ({ reasoning_options }) as ModelsDev.Model
   const target = (npm: string, id = "test-model") =>

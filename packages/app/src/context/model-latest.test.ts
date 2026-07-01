@@ -34,6 +34,34 @@ describe("pickLatestModels", () => {
     ])
   })
 
+  test("prefers a newer MiniMax family model over older M2.x entries", () => {
+    const result = pickLatestModels(
+      [
+        {
+          providerID: "minimax",
+          modelID: "MiniMax-M3",
+          family: "minimax",
+          release_date: "2026-06-01",
+        },
+        {
+          providerID: "minimax",
+          modelID: "MiniMax-M2.7",
+          family: "minimax",
+          release_date: "2026-03-18",
+        },
+        {
+          providerID: "minimax",
+          modelID: "MiniMax-M2.7-highspeed",
+          family: "minimax",
+          release_date: "2026-03-18",
+        },
+      ],
+      DateTime.fromISO("2026-06-01"),
+    )
+
+    expect(result).toEqual([{ providerID: "minimax", modelID: "MiniMax-M3" }])
+  })
+
   test("ignores stale models older than six months", () => {
     const result = pickLatestModels(
       [
