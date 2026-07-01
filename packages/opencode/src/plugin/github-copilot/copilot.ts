@@ -10,6 +10,7 @@ import { MessageV2 } from "@/session/message-v2"
 
 const CLIENT_ID = "Ov23li8tweQw6odWQebz"
 const API_VERSION = "2026-06-01"
+const INTEGRATION_ID = "vscode-chat"
 const UTILITY_MODELS = ["gpt-5.4-nano", "gpt-4.1", "gpt-4o", "gpt-4o-mini"]
 // Add a small safety buffer when polling to avoid hitting the server
 // slightly too early due to clock skew / timer drift.
@@ -80,6 +81,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
             Authorization: `Bearer ${auth.refresh}`,
             "User-Agent": `opencode/${InstallationVersion}`,
             "X-GitHub-Api-Version": API_VERSION,
+            "Copilot-Integration-Id": INTEGRATION_ID,
           },
           provider.models,
         )
@@ -169,6 +171,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
               "User-Agent": `opencode/${InstallationVersion}`,
               Authorization: `Bearer ${info.refresh}`,
               "Openai-Intent": "conversation-edits",
+              "Copilot-Integration-Id": INTEGRATION_ID,
             }
 
             if (isVision) {
@@ -367,6 +370,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
       if (!incoming.model.providerID.includes("github-copilot")) return
 
       output.headers["X-GitHub-Api-Version"] = API_VERSION
+      output.headers["Copilot-Integration-Id"] = INTEGRATION_ID
       if (incoming.agent === "title") {
         output.headers["X-Interaction-Type"] = "agent-session-name-generation"
       }
