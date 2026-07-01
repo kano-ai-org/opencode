@@ -76,6 +76,7 @@ type SelectableItem = Item & {
 }
 const decodeModels = Schema.decodeUnknownSync(schema)
 const decodeItem = Schema.decodeUnknownOption(item)
+const SELECTABLE_MODELS = new Set(["gpt-5.4"])
 
 function build(key: string, remote: SelectableItem, url: string, prev?: Model): Model {
   const reasoning =
@@ -247,7 +248,9 @@ export async function get(
 
   return {
     models: result,
-    pickerEnabled: new Set([...remote].filter(([, item]) => item.model_picker_enabled).map(([id]) => id)),
+    pickerEnabled: new Set(
+      [...remote].filter(([id, item]) => item.model_picker_enabled || SELECTABLE_MODELS.has(id)).map(([id]) => id),
+    ),
   }
 }
 
