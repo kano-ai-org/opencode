@@ -1,8 +1,8 @@
 import { useServerSync } from "@/context/server-sync"
 import { decode64 } from "@/utils/base64"
+import type { Provider } from "@opencode-ai/sdk/v2/client"
 import { useParams } from "@solidjs/router"
-import { Iterable, pipe } from "effect"
-import { createEffect, createMemo, type Accessor } from "solid-js"
+import type { Accessor } from "solid-js"
 import { selectProviderCatalog } from "./provider-catalog"
 
 export const popularProviders = [
@@ -16,6 +16,7 @@ export const popularProviders = [
   "vercel",
 ]
 const popularProviderSet = new Set(popularProviders)
+type ProviderEntry = [string, Provider]
 
 export function useProviders(directory: Accessor<string | undefined>) {
   const serverSync = useServerSync()
@@ -39,35 +40,25 @@ export function useProviders(directory: Accessor<string | undefined>) {
   }
 
   return {
-    all: () => providers().all,
+    all: () => providers().all as Map<string, Provider>,
     default: () => providers().default,
-    popular: () =>
-      pipe(
-        providers().all,
-        Iterable.map(([, p]) => p),
-        Iterable.filter((p) => popularProviderSet.has(p.id)),
-        (v) => Array.from(v),
+    popular: (): Provider[] =>
+      Array.from((providers().all as Map<string, Provider>).values()).filter((provider) =>
+        popularProviderSet.has(provider.id),
       ),
     connected: () => {
       const connected = new Set(providers().connected)
-      return pipe(
-        providers().all,
-        Iterable.map(([, p]) => p),
-        Iterable.filter((p) => connected.has(p.id)),
-        (v) => Array.from(v),
+      return Array.from((providers().all as Map<string, Provider>).values()).filter((provider) =>
+        connected.has(provider.id),
       )
     },
     paid: () => {
       const connected = new Set(providers().connected)
-      const paid = [
-        ...Iterable.filter(
-          providers().all,
-          ([id]) =>
-            connected.has(id) &&
-            (id !== "opencode" || Object.values(providers().all.get(id)?.models ?? {}).some((m) => m.cost?.input)),
-        ),
-      ]
-      return paid
+      return Array.from(providers().all as Map<string, Provider>).filter(
+        ([id, provider]) =>
+          connected.has(id) &&
+          (id !== "opencode" || Object.values(provider.models).some((model) => model.cost?.input)),
+      ) as ProviderEntry[]
     },
   }
 }
