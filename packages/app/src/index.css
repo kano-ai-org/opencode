@@ -17,6 +17,26 @@
   font-style: normal;
 }
 
+:root {
+  --opencode-visual-viewport-top: 0px;
+  --opencode-visual-viewport-left: 0px;
+  --opencode-visual-viewport-width: 100vw;
+  --opencode-visual-viewport-height: 100dvh;
+}
+
+#root {
+  box-sizing: border-box;
+}
+
+#root[data-mobile-visual-viewport] {
+  position: fixed;
+  top: var(--opencode-visual-viewport-top);
+  left: var(--opencode-visual-viewport-left);
+  width: var(--opencode-visual-viewport-width);
+  height: var(--opencode-visual-viewport-height);
+  max-width: 100vw;
+}
+
 @media (display-mode: standalone) {
   /* WebKit excludes safe-area insets from dvh in installed apps. */
   #root {

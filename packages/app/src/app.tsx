@@ -294,11 +294,56 @@ function BodyDesignClass() {
   return null
 }
 
+function VisualViewportBridge() {
+  createEffect(() => {
+    if (typeof window === "undefined") return
+
+    const root = document.getElementById("root")
+    const style = document.documentElement.style
+    const mobile = window.matchMedia("(max-width: 767px) and (pointer: coarse)")
+
+    const sync = () => {
+      const viewport = window.visualViewport
+      const top = viewport?.offsetTop ?? 0
+      const left = viewport?.offsetLeft ?? 0
+      const width = viewport?.width ?? window.innerWidth
+      const height = viewport?.height ?? window.innerHeight
+
+      style.setProperty("--opencode-visual-viewport-top", `${Math.max(0, top)}px`)
+      style.setProperty("--opencode-visual-viewport-left", `${Math.max(0, left)}px`)
+      style.setProperty("--opencode-visual-viewport-width", `${Math.max(1, width)}px`)
+      style.setProperty("--opencode-visual-viewport-height", `${Math.max(1, height)}px`)
+      root?.toggleAttribute("data-mobile-visual-viewport", mobile.matches)
+    }
+
+    sync()
+
+    const viewport = window.visualViewport
+    viewport?.addEventListener("resize", sync)
+    viewport?.addEventListener("scroll", sync)
+    window.addEventListener("resize", sync)
+    if (mobile.addEventListener) mobile.addEventListener("change", sync)
+    else mobile.addListener(sync)
+
+    onCleanup(() => {
+      viewport?.removeEventListener("resize", sync)
+      viewport?.removeEventListener("scroll", sync)
+      window.removeEventListener("resize", sync)
+      if (mobile.removeEventListener) mobile.removeEventListener("change", sync)
+      else mobile.removeListener(sync)
+      root?.removeAttribute("data-mobile-visual-viewport")
+    })
+  })
+
+  return null
+}
+
 // Server-agnostic providers shared across every route. These live in the shared
 // shell (router root) so they stay mounted regardless of the active server/route.
 function SharedProviders(props: ParentProps) {
   return (
     <>
+      <VisualViewportBridge />
       <BodyDesignClass />
       <CommandProvider>
         <DesktopCommands />
