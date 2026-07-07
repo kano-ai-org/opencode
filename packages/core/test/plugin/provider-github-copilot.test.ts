@@ -5,6 +5,7 @@ import { Catalog } from "@opencode-ai/core/catalog"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { PluginV2 } from "@opencode-ai/core/plugin"
 import { PluginHost } from "@opencode-ai/core/plugin/host"
+import { ProviderPlugins } from "@opencode-ai/core/plugin/provider"
 import { GithubCopilotPlugin } from "@opencode-ai/core/plugin/provider/github-copilot"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import type { LanguageModelV3 } from "@ai-sdk/provider"
@@ -39,6 +40,10 @@ function fakeSelectorSdk(calls: string[]) {
 }
 
 describe("GithubCopilotPlugin", () => {
+  it.effect("is registered so Copilot provider behavior can be applied", () =>
+    Effect.sync(() => expect(ProviderPlugins.map((item) => item.id)).toContain(PluginV2.ID.make("github-copilot"))),
+  )
+
   it.effect("creates the bundled Copilot SDK for the GitHub Copilot package", () =>
     Effect.gen(function* () {
       const plugin = yield* PluginV2.Service
@@ -203,6 +208,22 @@ describe("GithubCopilotPlugin", () => {
         required(yield* catalog.model.get(ProviderV2.ID.make("github-copilot"), ModelV2.ID.make("gpt-5-chat-latest")))
           .enabled,
       ).toBe(false)
+    }),
+  )
+
+  it.effect("keeps static gpt-5.4 enabled for GitHub Copilot when the catalog is transformed", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      yield* catalog.transform((catalog) => {
+        catalog.provider.update(ProviderV2.ID.make("github-copilot"), () => {})
+        catalog.model.update(ProviderV2.ID.make("github-copilot"), ModelV2.ID.make("gpt-5.4"), () => {})
+      })
+      yield* addPlugin()
+
+      expect(
+        required(yield* catalog.model.get(ProviderV2.ID.make("github-copilot"), ModelV2.ID.make("gpt-5.4")))
+          .enabled,
+      ).toBe(true)
     }),
   )
 
