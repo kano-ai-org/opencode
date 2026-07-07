@@ -552,7 +552,7 @@ test("remaps fallback oauth model urls to the enterprise host", async () => {
   expect(Object.keys(models["gpt-5.3-codex"].variants ?? {})).toEqual(["low", "medium", "high", "xhigh"])
 })
 
-test("does not narrow oauth model catalog to a chat integration", async () => {
+test("surfaces requestable gpt-5.4 without narrowing oauth model catalog to a chat integration", async () => {
   let headers: HeadersInit | undefined
   globalThis.fetch = mock((_url, init) => {
     headers = init?.headers
@@ -635,8 +635,131 @@ test("does not narrow oauth model catalog to a chat integration", async () => {
   )
 
   expect(new Headers(headers).get("Copilot-Integration-Id")).toBeNull()
-  expect(models["gpt-5.4"]).toBeDefined()
+  expect(models["gpt-5.4"]?.api.id).toBe("gpt-5.4")
   expect(models["gpt-5.4-nano"]).toBeUndefined()
+})
+
+test("does not surface gpt-5.4 when the live Copilot catalog omits it", async () => {
+  let headers: HeadersInit | undefined
+  globalThis.fetch = mock((_url, init) => {
+    headers = init?.headers
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              model_picker_enabled: true,
+              id: "gpt-5.5",
+              name: "GPT-5.5",
+              version: "gpt-5.5",
+              supported_endpoints: ["/responses"],
+              capabilities: {
+                family: "gpt-5.5",
+                limits: {
+                  max_context_window_tokens: 400000,
+                  max_output_tokens: 128000,
+                  max_prompt_tokens: 272000,
+                },
+                supports: {
+                  reasoning_effort: ["low", "medium", "high"],
+                  streaming: true,
+                  tool_calls: true,
+                },
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    )
+  }) as unknown as typeof fetch
+
+  const hooks = await CopilotAuthPlugin({
+    client: {} as never,
+    project: {} as never,
+    directory: "",
+    worktree: "",
+    experimental_workspace: {
+      register() {},
+    },
+    serverUrl: new URL("https://example.com"),
+    $: {} as never,
+  })
+
+  const models = await hooks.provider!.models!(
+    {
+      id: "github-copilot",
+      models: {
+        "gpt-5.4": {
+          id: "gpt-5.4",
+          providerID: "github-copilot",
+          api: {
+            id: "gpt-5.4",
+            url: "https://api.githubcopilot.com",
+            npm: "@ai-sdk/github-copilot",
+          },
+          name: "GPT-5.4",
+          family: "gpt",
+          capabilities: {
+            temperature: false,
+            reasoning: true,
+            attachment: true,
+            toolcall: true,
+            input: {
+              text: true,
+              audio: false,
+              image: true,
+              video: false,
+              pdf: false,
+            },
+            output: {
+              text: true,
+              audio: false,
+              image: false,
+              video: false,
+              pdf: false,
+            },
+            interleaved: false,
+          },
+          cost: {
+            input: 0,
+            output: 0,
+            cache: {
+              read: 0,
+              write: 0,
+            },
+          },
+          limit: {
+            context: 1050000,
+            input: 922000,
+            output: 128000,
+          },
+          options: {},
+          headers: {},
+          release_date: "2025-08-07",
+          variants: {
+            low: { reasoningEffort: "low" },
+            medium: { reasoningEffort: "medium" },
+            high: { reasoningEffort: "high" },
+            xhigh: { reasoningEffort: "xhigh" },
+          },
+          status: "active",
+        },
+      },
+    } as never,
+    {
+      auth: {
+        type: "oauth",
+        refresh: "token",
+        access: "token",
+        expires: Date.now() + 60_000,
+      } as never,
+    },
+  )
+
+  expect(new Headers(headers).get("Copilot-Integration-Id")).toBeNull()
+  expect(models["gpt-5.4"]).toBeUndefined()
+  expect(models["gpt-5.5"]).toBeDefined()
 })
 
 test("uses the chat integration for oauth provider requests", async () => {
