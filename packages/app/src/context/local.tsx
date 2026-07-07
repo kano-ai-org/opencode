@@ -8,6 +8,7 @@ import { useSettings } from "@/context/settings"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
 import { hasCustomAgent, resolveAgent } from "./local-agent"
+import { isModelVisibleInSelector } from "./model-visibility"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
 import { useSDK } from "./sdk"
 import { useSync } from "./sync"
@@ -317,7 +318,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         )
       },
       visible(item: ModelKey) {
-        return models.visible(item)
+        const active = current()
+        return isModelVisibleInSelector(
+          item,
+          models.visible(item),
+          active ? { providerID: active.provider.id, modelID: active.id } : undefined,
+        )
       },
       setVisibility(item: ModelKey, visible: boolean) {
         models.setVisibility(item, visible)
