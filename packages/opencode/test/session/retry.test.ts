@@ -171,6 +171,18 @@ describe("session.retry.retryable", () => {
     })
   })
 
+  test("retries transport timeout errors wrapped as abort errors", () => {
+    const request = MessageV2.fromError(
+      new DOMException("Provider response headers timed out after 10000ms", "AbortError"),
+      { providerID },
+    )
+    expect(SessionV1.APIError.isInstance(request)).toBe(true)
+    expect(SessionV1.AbortedError.isInstance(request)).toBe(false)
+    expect(SessionRetry.retryable(request, retryProvider)).toEqual({
+      message: "Provider response headers timed out after 10000ms",
+    })
+  })
+
   test("retries websocket stream transport errors", () => {
     const request = MessageV2.fromError(
       new ProviderError.ResponseStreamError("WebSocket closed before response.completed (code 1006: Connection ended)"),
