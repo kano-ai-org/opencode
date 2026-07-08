@@ -607,6 +607,21 @@ export function fromError(
   e: unknown,
   ctx: { providerID: ProviderV2.ID; aborted?: boolean },
 ): NonNullable<Assistant["error"]> {
+  const headerTimeout = toHeaderTimeoutError(e)
+  if (headerTimeout) {
+    return new APIError(
+      {
+        message: headerTimeout.message,
+        isRetryable: true,
+        metadata: {
+          code: headerTimeout.name,
+          timeoutMs: String(headerTimeout.ms),
+        },
+      },
+      { cause: e },
+    ).toObject()
+  }
+
   switch (true) {
     case e instanceof DOMException && e.name === "AbortError":
       return new AbortedError(
@@ -649,18 +664,6 @@ export function fromError(
           metadata: {
             code: (e as FetchDecompressionError).code,
             message: e.message,
-          },
-        },
-        { cause: e },
-      ).toObject()
-    case e instanceof ProviderError.HeaderTimeoutError:
-      return new APIError(
-        {
-          message: e.message,
-          isRetryable: true,
-          metadata: {
-            code: e.name,
-            timeoutMs: String(e.ms),
           },
         },
         { cause: e },
@@ -731,6 +734,14 @@ export function fromError(
       } catch {}
       return new NamedError.Unknown({ message: JSON.stringify(e) }, { cause: e }).toObject()
   }
+}
+
+function toHeaderTimeoutError(e: unknown) {
+  if (e instanceof ProviderError.HeaderTimeoutError) return e
+  if (!(e instanceof DOMException && e.name === "AbortError")) return
+  const match = /^Provider response headers timed out after ([1-9]\d*)ms$/.exec(e.message)
+  if (!match) return
+  return new ProviderError.HeaderTimeoutError(Number.parseInt(match[1], 10))
 }
 
 export * as MessageV2 from "./message-v2"
