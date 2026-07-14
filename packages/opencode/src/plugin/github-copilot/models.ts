@@ -2,6 +2,7 @@ import type { Model } from "@opencode-ai/sdk/v2"
 import { Option, Schema } from "effect"
 import type { Model as ProviderModel } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
+import { setTimeout as sleep } from "node:timers/promises"
 
 const item = Schema.Struct({
   model_picker_enabled: Schema.Boolean,
@@ -80,6 +81,7 @@ type CopilotModel = Omit<Model, "api"> & {
 }
 const decodeModels = Schema.decodeUnknownSync(schema)
 const decodeItem = Schema.decodeUnknownOption(item)
+const CATALOG_ROUTE_RETRY_DELAYS_MS = [50, 100, 200, 400] as const
 const SELECTABLE_MODELS = new Set(["gpt-5.4"])
 
 function build(key: string, remote: SelectableItem, url: string, prev?: Model): Model {
@@ -222,11 +224,7 @@ function usable(item: Item): item is SelectableItem {
   )
 }
 
-export async function get(
-  baseURL: string,
-  headers: HeadersInit = {},
-  existing: Record<string, Model> = {},
-): Promise<{ models: Record<string, Model>; pickerEnabled: Set<string> }> {
+async function fetchRemoteModels(baseURL: string, headers: HeadersInit, expected: Set<string>, attempt = 0) {
   const data = await fetch(`${baseURL}/models`, {
     headers,
     signal: AbortSignal.timeout(5_000),
@@ -237,13 +235,33 @@ export async function get(
     return decodeModels(await res.json())
   })
 
-  const result = { ...existing }
   const remote = new Map(
     data.data.flatMap((raw) => {
       const item = Option.getOrUndefined(decodeItem(raw))
       return item && usable(item) ? ([[item.id, item]] as const) : []
     }),
   )
+  if ([...expected].every((id) => remote.has(id))) return remote
+
+  // Copilot can intermittently return a narrowed catalog that omits requestable models.
+  const delay = CATALOG_ROUTE_RETRY_DELAYS_MS[attempt]
+  if (delay === undefined) return remote
+  await sleep(delay)
+  return fetchRemoteModels(baseURL, headers, expected, attempt + 1)
+}
+
+export async function get(
+  baseURL: string,
+  headers: HeadersInit = {},
+  existing: Record<string, Model> = {},
+): Promise<{ models: Record<string, Model>; pickerEnabled: Set<string> }> {
+  const result = { ...existing }
+  const expected = new Set(
+    Object.values(existing)
+      .map((model) => model.api.id)
+      .filter((id) => SELECTABLE_MODELS.has(id)),
+  )
+  const remote = await fetchRemoteModels(baseURL, headers, expected)
 
   // prune existing models whose api.id isn't in the endpoint response
   for (const [key, model] of Object.entries(result)) {

@@ -805,3 +805,96 @@ test("uses the chat integration for oauth provider requests", async () => {
   expect(new Headers(headers).get("X-GitHub-Api-Version")).toBe("2026-06-01")
   expect(new Headers(headers).get("x-api-key")).toBeNull()
 })
+
+test("retries transient Copilot integration routing mismatches", async () => {
+  let calls = 0
+  globalThis.fetch = mock(() => {
+    calls += 1
+    if (calls === 1) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: "model_not_available_for_integrator",
+              message: 'The requested model is not available for integrator "copilot-language-server".',
+            },
+          }),
+          { status: 400 },
+        ),
+      )
+    }
+    return Promise.resolve(new Response("{}", { status: 200 }))
+  }) as unknown as typeof fetch
+
+  const hooks = await CopilotAuthPlugin({
+    client: {} as never,
+    project: {} as never,
+    directory: "",
+    worktree: "",
+    experimental_workspace: {
+      register() {},
+    },
+    serverUrl: new URL("https://example.com"),
+    $: {} as never,
+  })
+
+  const auth = await hooks.auth!.loader!(() =>
+    Promise.resolve({
+      type: "oauth",
+      refresh: "token",
+      access: "token",
+      expires: Date.now() + 60_000,
+    } as never),
+    {} as never,
+  )
+
+  const response = await auth.fetch!("https://api.githubcopilot.com/responses", {
+    method: "POST",
+    body: JSON.stringify({ model: "gpt-5.4", input: "hello" }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(calls).toBe(2)
+})
+
+test("retries a narrowed Copilot model catalog before pruning gpt-5.4", async () => {
+  let calls = 0
+  const model = (id: string) => ({
+    model_picker_enabled: id !== "gpt-5.4",
+    id,
+    name: id,
+    version: id,
+    supported_endpoints: ["/responses"],
+    capabilities: {
+      family: id,
+      limits: {
+        max_context_window_tokens: 400_000,
+        max_output_tokens: 128_000,
+        max_prompt_tokens: 272_000,
+      },
+      supports: {
+        streaming: true,
+        tool_calls: true,
+      },
+    },
+  })
+  globalThis.fetch = mock(() => {
+    calls += 1
+    return Promise.resolve(
+      Response.json({
+        data: calls === 1 ? [model("gpt-5.5")] : [model("gpt-5.4"), model("gpt-5.5")],
+      }),
+    )
+  }) as unknown as typeof fetch
+
+  const result = await CopilotModels.get("https://api.githubcopilot.com", {}, {
+    "gpt-5.4": {
+      api: { id: "gpt-5.4" },
+      capabilities: {},
+    } as never,
+  })
+
+  expect(result.models["gpt-5.4"]?.api.id).toBe("gpt-5.4")
+  expect(result.pickerEnabled.has("gpt-5.4")).toBeTrue()
+  expect(calls).toBe(2)
+})
