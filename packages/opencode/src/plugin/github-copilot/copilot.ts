@@ -11,6 +11,7 @@ import { MessageV2 } from "@/session/message-v2"
 const CLIENT_ID = "Ov23li8tweQw6odWQebz"
 const API_VERSION = "2026-06-01"
 const INTEGRATION_ID = "vscode-chat"
+const INTEGRATION_ROUTE_RETRY_DELAYS_MS = [100, 250, 500, 1000, 2000] as const
 const UTILITY_MODELS = ["gpt-5.4-nano", "gpt-4.1", "gpt-4o", "gpt-4o-mini"]
 // Add a small safety buffer when polling to avoid hitting the server
 // slightly too early due to clock skew / timer drift.
@@ -24,6 +25,25 @@ function getUrls(domain: string) {
     DEVICE_CODE_URL: `https://${domain}/login/device/code`,
     ACCESS_TOKEN_URL: `https://${domain}/login/oauth/access_token`,
   }
+}
+
+async function retryIntegrationRoute(send: () => Promise<Response>, attempt = 0): Promise<Response> {
+  const response = await send()
+  if (response.status !== 400) return response
+
+  // Copilot routing can intermittently classify vscode-chat requests as copilot-language-server.
+  const body: unknown = await response
+    .clone()
+    .json()
+    .catch(() => undefined)
+  if (!body || typeof body !== "object" || !("error" in body)) return response
+  if (!body.error || typeof body.error !== "object" || !("code" in body.error)) return response
+  if (body.error.code !== "model_not_available_for_integrator") return response
+
+  const delay = INTEGRATION_ROUTE_RETRY_DELAYS_MS[attempt]
+  if (delay === undefined) return response
+  await sleep(delay)
+  return retryIntegrationRoute(send, attempt + 1)
 }
 
 function base(enterpriseUrl?: string) {
@@ -181,10 +201,12 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
               headers["Copilot-Vision-Request"] = "true"
             }
 
-            return fetch(request, {
-              ...init,
-              headers,
-            })
+            return retryIntegrationRoute(() =>
+              fetch(request instanceof Request ? request.clone() : request, {
+                ...init,
+                headers,
+              }),
+            )
           },
         }
       },
