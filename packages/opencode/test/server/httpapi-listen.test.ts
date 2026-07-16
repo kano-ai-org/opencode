@@ -3,7 +3,9 @@ import net from "node:net"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { Flag } from "@opencode-ai/core/flag/flag"
+import { GlobalBus } from "../../src/bus/global"
 import { Server } from "../../src/server/server"
+import { GlobalPaths } from "../../src/server/routes/instance/httpapi/groups/global"
 import { PtyPaths } from "../../src/server/routes/instance/httpapi/groups/pty"
 import { withTimeout } from "../../src/util/timeout"
 import { resetDatabase } from "../fixture/db"
@@ -167,6 +169,42 @@ async function openPtySocket(listener: Awaited<ReturnType<typeof startListener>>
 }
 
 describe("HttpApi Server.listen", () => {
+  test("releases the global event listener after the client disconnects", async () => {
+    const listener = await startNoAuthListener()
+    const baseline = GlobalBus.listenerCount("event")
+    const disconnect = new AbortController()
+    try {
+      const response = await fetch(new URL(GlobalPaths.event, listener.url), {
+        signal: disconnect.signal,
+      })
+      const reader = response.body!.getReader()
+      const first = await reader.read()
+      expect(first.done).toBe(false)
+      expect(new TextDecoder().decode(first.value)).toContain("server.connected")
+      const next = reader.read().catch(() => undefined)
+      await withTimeout(
+        (async () => {
+          while (GlobalBus.listenerCount("event") !== baseline + 1) await Bun.sleep(10)
+        })(),
+        2_000,
+        "timed out waiting for the global event listener to be registered",
+      )
+
+      disconnect.abort()
+      await next
+      await withTimeout(
+        (async () => {
+          while (GlobalBus.listenerCount("event") !== baseline) await Bun.sleep(10)
+        })(),
+        2_000,
+        "timed out waiting for the global event listener to be released",
+      )
+    } finally {
+      disconnect.abort()
+      await stop(listener, "timed out stopping the event listener test server")
+    }
+  })
+
   testPty("serves HTTP routes and upgrades PTY websocket through Server.listen", async () => {
     await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
     const listener = await startListener()

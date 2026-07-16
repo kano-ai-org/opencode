@@ -1,5 +1,5 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { Cause, Duration, Effect, Layer, Schedule, Schema, Semaphore, Context } from "effect"
+import { Cause, Duration, Effect, Layer, Option, Schedule, Schema, Semaphore, Context } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { formatPatch, structuredPatch } from "diff"
 import path from "path"
@@ -7,6 +7,7 @@ import { AppProcess } from "@opencode-ai/core/process"
 import { InstanceState } from "@/effect/instance-state"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Hash } from "@opencode-ai/core/util/hash"
+import { EffectFlock } from "@opencode-ai/core/util/effect-flock"
 import { Config } from "@/config/config"
 import { Global } from "@opencode-ai/core/global"
 import { Info } from "@opencode-ai/schema/file-diff"
@@ -22,6 +23,7 @@ export type FileDiff = typeof FileDiff.Type
 
 const prune = "7.days"
 const limit = 2 * 1024 * 1024
+const staleIndexLockAge = Duration.minutes(1)
 const core = ["-c", "core.longpaths=true", "-c", "core.symlinks=true"]
 const cfg = ["-c", "core.autocrlf=false", ...core]
 const quote = [...cfg, "-c", "core.quotepath=false"]
@@ -46,12 +48,13 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Snapshot") {}
 
-const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | Config.Service> = Layer.effect(
+const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | Config.Service | EffectFlock.Service> = Layer.effect(
   Service,
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const appProcess = yield* AppProcess.Service
     const config = yield* Config.Service
+    const flock = yield* EffectFlock.Service
     const locks = new Map<string, Semaphore.Semaphore>()
 
     const lock = (key: string) => {
@@ -162,7 +165,27 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
         const exists = (file: string) => fs.exists(file).pipe(Effect.orDie)
         const read = (file: string) => fs.readFileString(file).pipe(Effect.catch(() => Effect.succeed("")))
         const remove = (file: string) => fs.remove(file).pipe(Effect.catch(() => Effect.void))
-        const locked = <A, E, R>(fx: Effect.Effect<A, E, R>) => lock(state.gitdir).withPermits(1)(fx)
+        const recoverIndexLock = Effect.fnUntraced(function* () {
+          const file = path.join(state.gitdir, "index.lock")
+          const info = yield* fs.stat(file).pipe(Effect.catch(() => Effect.succeed(undefined)))
+          if (!info) return
+          const modified = Option.getOrElse(info.mtime, () => new Date())
+          if (Date.now() - modified.getTime() <= Duration.toMillis(staleIndexLockAge)) return
+          yield* fs.remove(file).pipe(Effect.orDie)
+          yield* Effect.logWarning("removed stale snapshot index lock", { file })
+        })
+        const locked = <A, E, R>(fx: Effect.Effect<A, E, R>) =>
+          lock(state.gitdir).withPermits(1)(
+            flock
+              .withLock(
+                Effect.gen(function* () {
+                  yield* recoverIndexLock()
+                  return yield* fx
+                }),
+                `snapshot:${state.gitdir}`,
+              )
+              .pipe(Effect.orDie),
+          )
 
         const enabled = Effect.fnUntraced(function* () {
           if (state.vcs !== "git") return false
@@ -801,7 +824,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [FSUtil.node, AppProcess.node, Config.node],
+  deps: [FSUtil.node, AppProcess.node, Config.node, EffectFlock.node],
 })
 
 export * as Snapshot from "."
