@@ -1,0 +1,43 @@
+diff --git a/dist/NodeHttpServer.js b/dist/NodeHttpServer.js
+--- a/dist/NodeHttpServer.js
++++ b/dist/NodeHttpServer.js
+@@ -133,11 +133,16 @@ export const makeHandler = (httpEffect, options) => {
+       const map = new Map(services.mapUnsafe);
+       map.set(HttpServerRequest.key, new ServerRequestImpl(nodeRequest, nodeResponse));
+       const fiber = Fiber.runIn(Effect.runForkWith(Context.makeUnsafe(map))(handled), options.scope);
+-      nodeResponse.on("close", () => {
++      let interrupted = false;
++      const interrupt = () => {
++        if (interrupted) return;
+         if (!nodeResponse.writableEnded) {
++          interrupted = true;
+           fiber.interruptUnsafe(parent.id, ClientAbort.annotation);
+         }
+-      });
++      };
++      nodeRequest.once("aborted", interrupt);
++      nodeResponse.once("close", interrupt);
+     });
+   });
+ };
+diff --git a/src/NodeHttpServer.ts b/src/NodeHttpServer.ts
+--- a/src/NodeHttpServer.ts
++++ b/src/NodeHttpServer.ts
+@@ -193,10 +193,15 @@ export const makeHandler = <
+       map.set(HttpServerRequest.key, new ServerRequestImpl(nodeRequest, nodeResponse))
+       const fiber = Fiber.runIn(Effect.runForkWith(Context.makeUnsafe<any>(map))(handled), options.scope)
+-      nodeResponse.on("close", () => {
++      let interrupted = false
++      const interrupt = () => {
++        if (interrupted) return
+         if (!nodeResponse.writableEnded) {
++          interrupted = true
+           fiber.interruptUnsafe(parent.id, ClientAbort.annotation)
+         }
+-      })
++      }
++      nodeRequest.once("aborted", interrupt)
++      nodeResponse.once("close", interrupt)
+     })
+   })
+ }
