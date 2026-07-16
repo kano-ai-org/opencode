@@ -3,9 +3,12 @@ import { $ } from "bun"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { Global } from "@opencode-ai/core/global"
+import { Hash } from "@opencode-ai/core/util/hash"
 import fs from "fs/promises"
 import path from "path"
 import { Effect, Fiber, Layer } from "effect"
+import { InstanceState } from "../../src/effect/instance-state"
 import { Snapshot } from "../../src/snapshot"
 import {
   disposeAllInstances,
@@ -105,6 +108,28 @@ const withGitConfigGlobal = <A, E, R>(config: string, self: Effect.Effect<A, E, 
         else delete process.env.GIT_CONFIG_GLOBAL
       }),
   )
+
+it.instance(
+  "recovers a stale internal index lock",
+  withTrackedSnapshot(({ tmp, snapshot }) =>
+    Effect.gen(function* () {
+      const instance = yield* InstanceState.context
+      const lock = path.join(
+        Global.Path.data,
+        "snapshot",
+        instance.project.id,
+        Hash.fast(instance.worktree),
+        "index.lock",
+      )
+      yield* write(lock, "stale")
+      yield* Effect.promise(() => fs.utimes(lock, new Date(0), new Date(0)))
+      yield* write(`${tmp.path}/a.txt`, "modified")
+      expect(yield* snapshot.track()).toBeTruthy()
+      expect(yield* exists(lock)).toBe(false)
+    }),
+  ),
+  { git: true },
+)
 
 it.instance(
   "tracks deleted files correctly",
