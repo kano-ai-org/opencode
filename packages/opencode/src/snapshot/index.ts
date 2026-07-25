@@ -176,15 +176,17 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
         })
         const locked = <A, E, R>(fx: Effect.Effect<A, E, R>) =>
           lock(state.gitdir).withPermits(1)(
-            flock
-              .withLock(
-                Effect.gen(function* () {
-                  yield* recoverIndexLock()
-                  return yield* fx
-                }),
-                `snapshot:${state.gitdir}`,
-              )
-              .pipe(Effect.orDie),
+            state.vcs !== "git"
+              ? fx
+              : flock
+                  .withLock(
+                    Effect.gen(function* () {
+                      yield* recoverIndexLock()
+                      return yield* fx
+                    }),
+                    `snapshot:${state.gitdir}`,
+                  )
+                  .pipe(Effect.orDie),
           )
 
         const enabled = Effect.fnUntraced(function* () {
