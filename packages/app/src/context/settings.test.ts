@@ -36,6 +36,11 @@ describe("layout transition", () => {
     expect(resolveNewLayoutDesigns(false, undefined, true)).toBe(true)
   })
 
+  test("allows dev mode to restore the legacy interface before sunset", () => {
+    expect(resolveNewLayoutDesigns(false, true, true, true)).toBe(false)
+    expect(resolveNewLayoutDesigns(true, false, false, true)).toBe(true)
+  })
+
   test("sunset replaces the toggle with a dismissible notice", () => {
     expect(layoutTransitionState(true, true, true, false)).toEqual({ available: false, notice: true })
     expect(layoutTransitionState(true, true, true, true)).toEqual({ available: false, notice: false })

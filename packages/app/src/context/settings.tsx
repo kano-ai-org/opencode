@@ -120,8 +120,14 @@ export function nextSunsetCheckDelay(sunset: number, now: number) {
   return Math.min(Math.max(0, sunset - now), maximumSunsetTimeout)
 }
 
-export function resolveNewLayoutDesigns(retired: boolean, preference: boolean | undefined, fallback = true) {
+export function resolveNewLayoutDesigns(
+  retired: boolean,
+  preference: boolean | undefined,
+  fallback = true,
+  forceLegacy = false,
+) {
   if (retired) return true
+  if (forceLegacy) return false
   return preference ?? fallback
 }
 
@@ -254,20 +260,30 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     const layoutTransition = createMemo(() =>
       layoutTransitionState(!!sunset, layoutTransitionEligible(), oldInterfaceRetired(), newInterfaceNoticeDismissed()),
     )
+    const forceLegacyInterface = import.meta.env.VITE_OPENCODE_FORCE_LEGACY_INTERFACE === "1"
     const newLayoutDesigns = createMemo(() => {
-      if (layoutUpgrade()) return true
-      if (!ready() && !oldInterfaceRetired()) return legacyNewLayoutDesignsDefault
+      if (layoutUpgrade()) return resolveNewLayoutDesigns(oldInterfaceRetired(), true, true, forceLegacyInterface)
+      if (!ready()) {
+        return resolveNewLayoutDesigns(
+          oldInterfaceRetired(),
+          undefined,
+          legacyNewLayoutDesignsDefault,
+          forceLegacyInterface,
+        )
+      }
       if (!layoutTransitionClassified()) {
         return resolveNewLayoutDesigns(
           oldInterfaceRetired(),
           store.general?.newLayoutDesigns,
           legacyNewLayoutDesignsDefault,
+          forceLegacyInterface,
         )
       }
       return resolveNewLayoutDesigns(
         oldInterfaceRetired(),
         store.general?.newLayoutDesigns,
         layoutTransitionEligible() ? legacyNewLayoutDesignsDefault : newLayoutDesignsDefault,
+        forceLegacyInterface,
       )
     })
     const visible = (preference: () => boolean) => createMemo(() => !newLayoutDesigns() || preference())
