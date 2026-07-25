@@ -66,6 +66,7 @@ type ToolCall = {
 
 interface ProcessorContext extends Input {
   toolcalls: Record<string, ToolCall>
+  pendingToolUpdates: Record<string, Array<(part: SessionV1.ToolPart) => SessionV1.ToolPart>>
   shouldBreak: boolean
   snapshot: string | undefined
   blocked: boolean
@@ -105,6 +106,7 @@ const layer = Layer.effect(
         sessionID: input.sessionID,
         model: input.model,
         toolcalls: {},
+        pendingToolUpdates: {},
         shouldBreak: false,
         snapshot: initialSnapshot,
         blocked: false,
@@ -123,6 +125,7 @@ const layer = Layer.effect(
       const settleToolCall = Effect.fn("SessionProcessor.settleToolCall")(function* (toolCallID: string) {
         const done = ctx.toolcalls[toolCallID]?.done
         delete ctx.toolcalls[toolCallID]
+        delete ctx.pendingToolUpdates[toolCallID]
         if (done) yield* Deferred.succeed(done, undefined).pipe(Effect.ignore)
       })
 
@@ -146,7 +149,12 @@ const layer = Layer.effect(
         update: (part: SessionV1.ToolPart) => SessionV1.ToolPart,
       ) {
         const match = yield* readToolCall(toolCallID)
-        if (!match) return undefined
+        if (!match) {
+          const updates = ctx.pendingToolUpdates[toolCallID] ?? []
+          updates.push(update)
+          ctx.pendingToolUpdates[toolCallID] = updates
+          return undefined
+        }
         const part = yield* session.updatePart(update(match.part))
         ctx.toolcalls[toolCallID] = {
           ...match.call,
@@ -233,7 +241,7 @@ const layer = Layer.effect(
           }
           return { call: ctx.toolcalls[input.id], part }
         }
-        const part = yield* session.updatePart({
+        let pending: SessionV1.ToolPart = {
           id: PartID.ascending(),
           messageID: ctx.assistantMessage.id,
           sessionID: ctx.assistantMessage.sessionID,
@@ -242,7 +250,10 @@ const layer = Layer.effect(
           callID: input.id,
           state: { status: "pending", input: {}, raw: "" },
           metadata: input.providerExecuted ? { providerExecuted: true } : undefined,
-        } satisfies SessionV1.ToolPart)
+        }
+        for (const update of ctx.pendingToolUpdates[input.id] ?? []) pending = update(pending)
+        delete ctx.pendingToolUpdates[input.id]
+        const part = yield* session.updatePart(pending)
         ctx.toolcalls[input.id] = {
           done: yield* Deferred.make<void>(),
           partID: part.id,

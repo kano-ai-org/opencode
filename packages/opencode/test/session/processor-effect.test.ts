@@ -965,7 +965,7 @@ it.live("session.processor effect tests mark interruptions aborted without manua
   ),
 )
 
-itProviderError.live("session.processor effect tests fail provider-executed error results", () =>
+itProviderError.live("session.processor effect tests preserve updates queued before provider tool events", () =>
   provideTmpdirInstance(
     (dir) =>
       Effect.gen(function* () {
@@ -982,6 +982,16 @@ itProviderError.live("session.processor effect tests fail provider-executed erro
           return Effect.void
         })
         const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+        yield* handle.updateToolCall("call-1", (part) => ({
+          ...part,
+          state: {
+            status: "running",
+            input: { query: "weather" },
+            title: "Queued lookup",
+            metadata: { source: "early-update" },
+            time: { start: Date.now() },
+          },
+        }))
 
         yield* handle.process({
           user: {
@@ -1004,7 +1014,10 @@ itProviderError.live("session.processor effect tests fail provider-executed erro
         const parts = yield* MessageV2.parts(msg.id)
         const call = parts.find((part): part is SessionV1.ToolPart => part.type === "tool")
         expect(call?.state.status).toBe("error")
-        if (call?.state.status === "error") expect(call.state.error).toBe("provider boom")
+        if (call?.state.status === "error") {
+          expect(call.state.error).toBe("provider boom")
+          expect(call.state.metadata).toEqual({ source: "early-update" })
+        }
         expect(seen).toContain(MessageV2.Event.PartUpdated.type)
         expect(seen).toContain(MessageV2.Event.Updated.type)
         expect(seen.filter((type) => type.startsWith("session.next."))).toEqual([])
