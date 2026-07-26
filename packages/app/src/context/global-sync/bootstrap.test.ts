@@ -124,6 +124,81 @@ describe("bootstrapDirectory", () => {
     expect(store.status).toBe("complete")
     expect(mcpReads).toEqual([])
   })
+
+  test("keeps MCP refreshes on legacy endpoints after a v1 reconnect", async () => {
+    const legacyCalls: string[] = []
+    const currentCalls: string[] = []
+    const [store, setStore] = directoryState()
+    const location = { directory: "/project", project: { id: "project", directory: "/project" } }
+    const reconnectApi: ServerApi = {
+      ...api,
+      command: { list: async () => ({ location, data: [] }) },
+      mcp: {
+        ...api.mcp,
+        list: async () => {
+          currentCalls.push("status")
+          return { location, data: [] }
+        },
+        resource: {
+          ...api.mcp?.resource,
+          catalog: async () => {
+            currentCalls.push("resource")
+            return { location, data: { resources: [], templates: [] } }
+          },
+        },
+      },
+    }
+
+    await bootstrapDirectory({
+      directory: "/project",
+      scope: ServerScope.local,
+      mcp: true,
+      global: {
+        config: {} satisfies Config,
+        path: { state: "", config: "", worktree: "/project", directory: "/project", home: "/home" },
+        project: [{ id: "project", worktree: "/project" } as Project],
+        provider,
+      },
+      sdk: {
+        app: { agents: async () => ({ data: [{ name: "build", mode: "primary" }] }) },
+        config: { get: async () => ({ data: {} }) },
+        session: { status: async () => ({ data: {} }) },
+        vcs: { get: async () => ({ data: undefined }) },
+        command: { list: async () => ({ data: [] }) },
+        permission: { list: async () => ({ data: [] }) },
+        question: { list: async () => ({ data: [] }) },
+        v2: { reference: { list: async () => ({ data: { data: [] } }) } },
+        mcp: {
+          status: async () => {
+            legacyCalls.push("status")
+            return { data: {} }
+          },
+        },
+        experimental: {
+          resource: {
+            list: async () => {
+              legacyCalls.push("resource")
+              return { data: {} }
+            },
+          },
+        },
+        provider: { list: async () => ({ data: { all: [], connected: [], default: {} } }) },
+      } as unknown as OpencodeClient,
+      api: reconnectApi,
+      store,
+      setStore,
+      vcsCache: { setStore() {} } as unknown as VcsCache,
+      loadSessions() {},
+      translate: (key) => key,
+      queryClient: new QueryClient(),
+      protocol: Promise.resolve("v1"),
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 80))
+
+    expect(legacyCalls).toEqual(["status", "resource"])
+    expect(currentCalls).toEqual([])
+  })
 })
 
 describe("query keys", () => {
