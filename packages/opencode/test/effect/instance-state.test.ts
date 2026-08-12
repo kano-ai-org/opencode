@@ -2,7 +2,7 @@ import { expect } from "bun:test"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { $ } from "bun"
-import { Context, Deferred, Duration, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Context, Deferred, Duration, Effect, Exit, Fiber, Layer } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import {
   disposeAllInstancesEffect,
@@ -35,6 +35,28 @@ it.live("InstanceState caches values per directory", () =>
 
     expect(a).toBe(b)
     expect(n).toBe(1)
+  }),
+)
+
+it.live("InstanceState retries interrupted lookups", () =>
+  Effect.gen(function* () {
+    const dir = yield* tmpdirScoped()
+    let attempts = 0
+    const state = yield* InstanceState.make(() =>
+      Effect.gen(function* () {
+        attempts += 1
+        if (attempts === 1) return yield* Effect.interrupt
+        return { attempts }
+      }),
+    )
+
+    const first = yield* access(state, dir).pipe(Effect.exit)
+    expect(Exit.isFailure(first)).toBe(true)
+    if (Exit.isFailure(first)) expect(Cause.hasInterruptsOnly(first.cause)).toBe(true)
+
+    const second = yield* access(state, dir)
+    expect(second).toEqual({ attempts: 2 })
+    expect(attempts).toBe(2)
   }),
 )
 
