@@ -372,6 +372,18 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
                 <Show when={windows() || linux()}>
                   <WindowsAppMenu command={command} platform={platform} variant="v2" />
                 </Show>
+                <TooltipV2 placement="bottom" value={language.t("sidebar.menu.toggle")}>
+                  <IconButtonV2
+                    type="button"
+                    variant="ghost-muted"
+                    size="large"
+                    class="shrink-0 xl:hidden"
+                    icon={<IconV2 name="menu" />}
+                    onClick={layout.mobileSidebar.toggle}
+                    aria-label={language.t("sidebar.menu.toggle")}
+                    aria-expanded={layout.mobileSidebar.opened()}
+                  />
+                </TooltipV2>
                 <TooltipV2
                   placement="bottom"
                   value={
