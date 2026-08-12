@@ -276,12 +276,16 @@ export async function get(
     result[id] = build(id, m, baseURL)
   }
 
-  return {
-    models: result,
-    pickerEnabled: new Set(
-      [...remote].filter(([id, item]) => item.model_picker_enabled || SELECTABLE_MODELS.has(id)).map(([id]) => id),
-    ),
+  const pickerEnabled = new Set(
+    [...remote].filter(([id, item]) => item.model_picker_enabled || SELECTABLE_MODELS.has(id)).map(([id]) => id),
+  )
+  if (pickerEnabled.size === 0) {
+    // Some Copilot catalogs omit picker metadata for every requestable model.
+    // Keep the provider usable for explicit CLI/config selections in that case.
+    for (const id of Object.keys(result)) pickerEnabled.add(id)
   }
+
+  return { models: result, pickerEnabled }
 }
 
 export * as CopilotModels from "./models"
