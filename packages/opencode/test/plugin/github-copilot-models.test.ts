@@ -762,6 +762,43 @@ test("does not surface gpt-5.4 when the live Copilot catalog omits it", async ()
   expect(models["gpt-5.5"]).toBeDefined()
 })
 
+test("keeps the provider usable when the live catalog omits picker metadata", async () => {
+  globalThis.fetch = mock(() =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify({
+          data: [
+            {
+              model_picker_enabled: false,
+              id: "gpt-4.1",
+              name: "GPT-4.1",
+              version: "gpt-4.1",
+              capabilities: {
+                family: "gpt",
+                limits: {
+                  max_context_window_tokens: 128000,
+                  max_output_tokens: 16384,
+                  max_prompt_tokens: 128000,
+                },
+                supports: {
+                  streaming: true,
+                  tool_calls: true,
+                },
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    ),
+  ) as unknown as typeof fetch
+
+  const result = await CopilotModels.get("https://api.githubcopilot.com")
+
+  expect(result.pickerEnabled.has("gpt-4.1")).toBe(true)
+  expect(result.models["gpt-4.1"]?.api.id).toBe("gpt-4.1")
+})
+
 test("uses the chat integration for oauth provider requests", async () => {
   let headers: HeadersInit | undefined
   globalThis.fetch = mock((_request, init) => {
