@@ -17,6 +17,7 @@ import {
   createDirectorySearch,
   createPriorityTaskQueue,
   displayPickerPath,
+  mergeProjectCandidates,
   pickerParent,
   pickerRoot,
   pickerAbsoluteInput,
@@ -29,6 +30,19 @@ test("maps server directory entries into Pierre paths", () => {
       { name: "index.ts", type: "file" },
     ]),
   ).toEqual(["src/components/", "src/index.ts"])
+})
+
+test("merges known server projects without duplicating selected paths", () => {
+  const selected = [{ worktree: "D:\\_work\\_Kano\\kano-opencode" }]
+  const known = [
+    { worktree: "D:/_work/_Kano/kano-opencode/" },
+    { worktree: "D:/_work/_Hikari/Hikari" },
+  ]
+
+  expect(mergeProjectCandidates(selected, known)).toEqual([
+    selected[0],
+    known[1],
+  ])
 })
 
 test("maps Pierre paths back to the selected server root", () => {
