@@ -8,7 +8,12 @@ import { createMemo, createResource, createSignal } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { ServerConnection } from "@/context/server"
 import { useGlobal } from "@/context/global"
-import { cleanPickerInput, createDirectorySearch, displayPickerPath } from "./directory-picker-domain"
+import {
+  cleanPickerInput,
+  createDirectorySearch,
+  displayPickerPath,
+  mergeProjectCandidates,
+} from "./directory-picker-domain"
 import type { Path } from "@opencode-ai/sdk/v2/client"
 
 interface DialogSelectDirectoryProps {
@@ -84,7 +89,12 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
   })
 
   const recentProjects = createMemo(() => {
-    const projects = serverCtx.projects.list()
+    const projects = mergeProjectCandidates(
+      serverCtx.projects.list(),
+      sync.data.project
+        .filter((project) => project.worktree !== "/")
+        .map((project) => ({ ...project, expanded: false })),
+    )
     const byProject = new Map<string, number>()
 
     for (const project of projects) {

@@ -248,10 +248,28 @@ export function nativePickerPath(path: string) {
 import { getFilename } from "@opencode-ai/core/util/path"
 import fuzzysort from "fuzzysort"
 import { ServerSDK } from "@/context/server-sdk"
+import { pathKey } from "@/utils/path-key"
 
 export function cleanPickerInput(value: string) {
   const first = (value ?? "").split(/\r?\n/)[0] ?? ""
   return first.replace(/[\u0000-\u001F\u007F]/g, "").trim()
+}
+
+export function mergeProjectCandidates<T extends { worktree: string }>(
+  selected: readonly T[],
+  known: readonly T[],
+) {
+  const output = [...selected]
+  const seen = new Set(selected.map((project) => pathKey(project.worktree)))
+
+  for (const project of known) {
+    const key = pathKey(project.worktree)
+    if (seen.has(key)) continue
+    seen.add(key)
+    output.push(project)
+  }
+
+  return output
 }
 
 export function normalizePickerPath(input: string) {
