@@ -86,6 +86,23 @@ describe("InstanceStore", () => {
     }),
   )
 
+  it.live("lists loaded instance contexts and excludes disposed entries", () =>
+    Effect.gen(function* () {
+      const dir1 = yield* tmpdirScoped({ git: true })
+      const dir2 = yield* tmpdirScoped({ git: true })
+      const store = yield* InstanceStore.Service
+
+      const first = yield* store.load({ directory: dir1 })
+      const second = yield* store.load({ directory: dir2 })
+
+      expect(yield* store.list()).toEqual([first, second])
+
+      yield* store.dispose(first)
+
+      expect(yield* store.list()).toEqual([second])
+    }),
+  )
+
   it.live("dedupes concurrent loads while init is in flight", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped({ git: true })

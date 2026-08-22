@@ -2,9 +2,12 @@ import { Config } from "@/config/config"
 import { applyConfigPreset, listConfigPresets } from "@/config/presets"
 import { GlobalBus, type GlobalEvent as GlobalBusEvent } from "@/bus/global"
 import { EffectBridge } from "@/effect/bridge"
+import { InstanceRef } from "@/effect/instance-ref"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Installation } from "@/installation"
-import { disposeAllInstances, disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
+import { InstanceStore } from "@/project/instance-store"
+import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
+import { SessionStatus } from "@/session/status"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { Effect, Queue, Schema } from "effect"
 import * as Stream from "effect/Stream"
@@ -12,6 +15,7 @@ import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
+import { ConflictError } from "../errors"
 import { GlobalUpgradeInput } from "../groups/global"
 
 function eventData(data: unknown): Sse.Event {
@@ -70,6 +74,8 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
   Effect.gen(function* () {
     const config = yield* Config.Service
     const installation = yield* Installation.Service
+    const instances = yield* InstanceStore.Service
+    const sessionStatus = yield* SessionStatus.Service
     const bridge = yield* EffectBridge.make()
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
@@ -96,12 +102,28 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       )
     })
 
+    const activeSessionCount = Effect.fn("GlobalHttpApi.activeSessionCount")(function* () {
+      const contexts = yield* instances.list()
+      const statuses = yield* Effect.forEach(contexts, (ctx) =>
+        sessionStatus.list().pipe(Effect.provideService(InstanceRef, ctx)),
+      )
+      return statuses.reduce((total, current) => total + current.size, 0)
+    })
+
     const configPresetApply = Effect.fn("GlobalHttpApi.configPresetApply")(function* (ctx) {
+      const activeSessions = yield* activeSessionCount()
+      if (activeSessions > 0) {
+        return yield* new ConflictError({
+          message:
+            "Cannot switch the model config preset while sessions are running. Wait for them to finish and try again.",
+          resource: "model-config-preset",
+        })
+      }
       const result = yield* Effect.tryPromise(() => applyConfigPreset(ctx.payload.id)).pipe(
         Effect.mapError(() => new HttpApiError.BadRequest({})),
       )
       yield* config.invalidate()
-      bridge.fork(disposeAllInstances({ swallowErrors: true }))
+      yield* disposeAllInstancesAndEmitGlobalDisposed()
       return result
     })
 

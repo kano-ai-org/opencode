@@ -73,8 +73,16 @@ const emptyModelConfigPresets: ModelConfigPresetList = { presets: [] }
 
 async function readServerJson<T>(response: Response): Promise<T> {
   if (response.ok) return response.json() as Promise<T>
+  const body = await response
+    .clone()
+    .json()
+    .catch(() => undefined)
+  const message =
+    typeof body === "object" && body !== null && "message" in body && typeof body.message === "string"
+      ? body.message
+      : undefined
   const text = await response.text().catch(() => "")
-  throw new Error(text || response.statusText || `HTTP ${response.status}`)
+  throw new Error(message || text || response.statusText || `HTTP ${response.status}`)
 }
 
 // To prevent audio from overlapping/playing very quickly when navigating the settings menus,
