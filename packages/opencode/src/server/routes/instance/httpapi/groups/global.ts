@@ -6,6 +6,7 @@ import "@opencode-ai/core/account"
 import "@/server/event"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
+import { ConflictError } from "../errors"
 import semver from "semver"
 import { described } from "./metadata"
 
@@ -145,8 +146,7 @@ export const GlobalApi = HttpApi.make("global").add(
       HttpApiEndpoint.post("configPresetApply", GlobalPaths.configPresetApply, {
         payload: ConfigPresetApplyInput,
         success: described(ConfigPresetList, "Applied model config preset"),
-        error: HttpApiError.BadRequest,
-      }).annotateMerge(
+        error: [HttpApiError.BadRequest, ConflictError],      }).annotateMerge(
         OpenApi.annotations({
           identifier: "global.config.preset.apply",
           summary: "Apply model config preset",

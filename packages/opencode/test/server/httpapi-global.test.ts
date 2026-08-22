@@ -1,11 +1,15 @@
 import { NodeHttpServer } from "@effect/platform-node"
+import { ProjectV2 } from "@opencode-ai/core/project"
 import { describe, expect } from "bun:test"
-import { Context, Effect, Layer, Option } from "effect"
-import { HttpBody, HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http"
+import { Context, Effect, Layer, Option, Ref } from "effect"import { HttpBody, HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Auth } from "../../src/auth"
 import { Config } from "../../src/config/config"
 import { Installation } from "../../src/installation"
+import type { InstanceContext } from "../../src/project/instance-context"
+import { InstanceStore } from "../../src/project/instance-store"
+import { SessionID } from "../../src/session/schema"
+import { SessionStatus } from "../../src/session/status"
 import { MoveSession } from "@opencode-ai/core/control-plane/move-session"
 import { ServerAuth } from "../../src/server/auth"
 import { RootHttpApi } from "../../src/server/routes/instance/httpapi/api"
@@ -16,6 +20,18 @@ import { globalHandlers } from "../../src/server/routes/instance/httpapi/handler
 import { authorizationLayer } from "../../src/server/routes/instance/httpapi/middleware/authorization"
 import { schemaErrorLayer } from "../../src/server/routes/instance/httpapi/middleware/schema-error"
 import { testEffect } from "../lib/effect"
+
+const presetBusy = Ref.makeUnsafe(false)
+const presetContext: InstanceContext = {
+  directory: "/busy",
+  worktree: "/busy",
+  project: {
+    id: ProjectV2.ID.make("preset-busy"),
+    worktree: "/busy",
+    time: { created: 0, updated: 0 },
+    sandboxes: [],
+  },
+}
 
 const apiLayer = HttpRouter.serve(
   HttpApiBuilder.layer(RootHttpApi).pipe(
@@ -30,6 +46,23 @@ const apiLayer = HttpRouter.serve(
   Layer.provideMerge(NodeHttpServer.layerTest),
   Layer.provide(Layer.mock(Auth.Service)({})),
   Layer.provide(Layer.mock(Config.Service)({})),
+  Layer.provide(
+    Layer.mock(InstanceStore.Service)({
+      list: () => Ref.get(presetBusy).pipe(Effect.map((busy) => (busy ? [presetContext] : []))),
+    }),
+  ),
+  Layer.provide(
+    Layer.mock(SessionStatus.Service)({
+      list: () =>
+        Ref.get(presetBusy).pipe(
+          Effect.map((busy) =>
+            busy
+              ? new Map([[SessionID.make("ses_preset_busy"), { type: "busy" as const }]])
+              : new Map<SessionID, SessionStatus.Info>(),
+          ),
+        ),
+    }),
+  ),
   Layer.provide(Layer.mock(MoveSession.Service)({})),
   Layer.provide(
     Layer.mock(Installation.Service)({
@@ -43,6 +76,24 @@ const apiLayer = HttpRouter.serve(
 const it = testEffect(apiLayer)
 
 describe("global HttpApi", () => {
+  it.live("rejects model preset reload while a session is busy", () =>
+    Effect.gen(function* () {
+      yield* Ref.set(presetBusy, true)
+      const response = yield* HttpClientRequest.post(GlobalPaths.configPresetApply).pipe(
+        HttpClientRequest.setBody(HttpBody.jsonUnsafe({ id: "openai" })),
+        HttpClient.execute,
+      )
+
+      expect(response.status).toBe(409)
+      expect(yield* response.json).toMatchObject({
+        _tag: "ConflictError",
+        message:
+          "Cannot switch the model config preset while sessions are running. Wait for them to finish and try again.",
+        resource: "model-config-preset",
+      })
+    }).pipe(Effect.ensuring(Ref.set(presetBusy, false))),
+  )
+
   it.live("upgrades to the requested version", () =>
     Effect.gen(function* () {
       const response = yield* HttpClientRequest.post(GlobalPaths.upgrade).pipe(
