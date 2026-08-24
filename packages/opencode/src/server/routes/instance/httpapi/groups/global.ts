@@ -54,6 +54,22 @@ export const GlobalUpgradeInput = Schema.Struct({
   ),
 })
 
+export const ConfigPreset = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  filename: Schema.String,
+  active: Schema.Boolean,
+})
+
+export const ConfigPresetList = Schema.Struct({
+  active: Schema.optional(Schema.String),
+  presets: Schema.Array(ConfigPreset),
+})
+
+export const ConfigPresetApplyInput = Schema.Struct({
+  id: Schema.String,
+})
+
 const GlobalUpgradeResult = Schema.Union([
   Schema.Struct({
     success: Schema.Literal(true),
@@ -69,6 +85,8 @@ export const GlobalPaths = {
   health: "/global/health",
   event: "/global/event",
   config: "/global/config",
+  configPresets: "/global/config/presets",
+  configPresetApply: "/global/config/presets/apply",
   dispose: "/global/dispose",
   upgrade: "/global/upgrade",
 } as const
@@ -112,6 +130,27 @@ export const GlobalApi = HttpApi.make("global").add(
           identifier: "global.config.update",
           summary: "Update global configuration",
           description: "Update global OpenCode configuration settings and preferences.",
+        }),
+      ),
+      HttpApiEndpoint.get("configPresets", GlobalPaths.configPresets, {
+        success: described(ConfigPresetList, "List available model config presets"),
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.config.presets",
+          summary: "List model config presets",
+          description: "List local oh-my-openagent config presets available for runtime switching.",
+        }),
+      ),
+      HttpApiEndpoint.post("configPresetApply", GlobalPaths.configPresetApply, {
+        payload: ConfigPresetApplyInput,
+        success: described(ConfigPresetList, "Applied model config preset"),
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.config.preset.apply",
+          summary: "Apply model config preset",
+          description: "Apply a local oh-my-openagent config preset and reload OpenCode instances.",
         }),
       ),
       HttpApiEndpoint.post("dispose", GlobalPaths.dispose, {

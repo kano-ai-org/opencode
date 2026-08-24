@@ -1,4 +1,5 @@
 import { Config } from "@/config/config"
+import { applyConfigPreset, listConfigPresets } from "@/config/presets"
 import { GlobalBus, type GlobalEvent as GlobalBusEvent } from "@/bus/global"
 import { EffectBridge } from "@/effect/bridge"
 import { EventV2 } from "@opencode-ai/core/event"
@@ -8,7 +9,7 @@ import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { Effect, Queue } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerResponse } from "effect/unstable/http"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
 import { GlobalUpgradeInput } from "../groups/global"
@@ -81,6 +82,21 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       return result.info
     })
 
+    const configPresets = Effect.fn("GlobalHttpApi.configPresets")(function* () {
+      return yield* Effect.tryPromise(() => listConfigPresets()).pipe(
+        Effect.mapError(() => new HttpApiError.BadRequest({})),
+      )
+    })
+
+    const configPresetApply = Effect.fn("GlobalHttpApi.configPresetApply")(function* (ctx) {
+      const result = yield* Effect.tryPromise(() => applyConfigPreset(ctx.payload.id)).pipe(
+        Effect.mapError(() => new HttpApiError.BadRequest({})),
+      )
+      yield* config.invalidate()
+      bridge.fork(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
+      return result
+    })
+
     const dispose = Effect.fn("GlobalHttpApi.dispose")(function* () {
       yield* disposeAllInstancesAndEmitGlobalDisposed()
       return true
@@ -120,6 +136,8 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handleRaw("event", event)
       .handle("configGet", configGet)
       .handle("configUpdate", configUpdate)
+      .handle("configPresets", configPresets)
+      .handle("configPresetApply", configPresetApply)
       .handle("dispose", dispose)
       .handle("upgrade", upgrade)
   }),
