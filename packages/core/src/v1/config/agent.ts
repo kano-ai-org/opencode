@@ -77,7 +77,15 @@ const normalize = (agent: Schema.Schema.Type<typeof AgentSchema>): Schema.Schema
   globalThis.Object.assign(permission, agent.permission)
 
   const steps = agent.steps ?? agent.maxSteps
-  return { ...agent, options, permission, ...(steps !== undefined ? { steps } : {}) }
+  const legacyReasoningEffort = (agent as { reasoningEffort?: unknown }).reasoningEffort
+  const variant = agent.variant ?? (typeof legacyReasoningEffort === "string" ? legacyReasoningEffort : undefined)
+  return {
+    ...agent,
+    ...(variant !== undefined ? { variant } : {}),
+    options,
+    permission,
+    ...(steps !== undefined ? { steps } : {}),
+  }
 }
 
 export const Info = AgentSchema.pipe(
