@@ -480,7 +480,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       const cache = children.vcsCache.get(key)
       if (!cache) return
       const sdk = sdkFor(directory)
-      await bootstrapDirectory({
+      const refresh = bootstrapDirectory({
         directory,
         scope: serverSDK.scope,
         mcp: children.mcp(key),
@@ -501,6 +501,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
         session,
         protocol: serverSDK.protocol,
       })
+      await refresh.settled
     })
 
     booting.set(key, promise)

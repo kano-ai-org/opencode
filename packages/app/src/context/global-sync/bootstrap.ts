@@ -327,7 +327,7 @@ export const loadReferencesQuery = (
     placeholderData: [],
   })
 
-export async function bootstrapDirectory(input: {
+export function bootstrapDirectory(input: {
   directory: string
   scope: ServerScope
   mcp: boolean
@@ -371,7 +371,7 @@ export async function bootstrapDirectory(input: {
   const revKey = ScopedKey.from(input.scope, input.directory)
   const rev = (providerRev.get(revKey) ?? 0) + 1
   providerRev.set(revKey, rev)
-  ;(async () => {
+  const settled = (async () => {
     const slow = [
       () => Promise.resolve(input.loadSessions(input.directory)),
       () =>
@@ -513,7 +513,6 @@ export async function bootstrapDirectory(input: {
             )
           }),
         ),
-      () => Promise.resolve(input.loadSessions(input.directory)),
       input.mcp &&
         (() =>
           input.queryClient.fetchQuery(
@@ -525,30 +524,23 @@ export async function bootstrapDirectory(input: {
             loadMcpResourcesQuery(input.scope, input.directory, input.api.mcp, input.sdk, input.protocol),
           )),
       () =>
-        input.queryClient
-          .fetchQuery(loadProvidersQuery(input.scope, input.directory, input.api, input.sdk, input.protocol))
-          .catch((err) => {
-            const project = getFilename(input.directory)
-            showToast({
-              variant: "error",
-              title: input.translate("toast.project.reloadFailed.title", { project }),
-              description: formatServerError(err, input.translate),
-            })
-          }),
+        input.queryClient.fetchQuery(
+          loadProvidersQuery(input.scope, input.directory, input.api, input.sdk, input.protocol),
+        ),
     ].filter(Boolean) as (() => Promise<any>)[]
 
     await waitForPaint()
     const slowErrs = errors(await runAll(slow))
-    if (slowErrs.length > 0) {
-      console.error("Failed to finish bootstrap instance", slowErrs[0])
-      const project = getFilename(input.directory)
-      showToast({
-        variant: "error",
-        title: input.translate("toast.project.reloadFailed.title", { project }),
-        description: formatServerError(slowErrs[0], input.translate),
-      })
-    }
+    if (slowErrs.length > 0) console.error("Failed to finish bootstrap instance", slowErrs[0])
+    showErrors({
+      errors: slowErrs,
+      title: input.translate("toast.project.reloadFailed.title", { project: getFilename(input.directory) }),
+      translate: input.translate,
+      formatMoreCount: (count) => input.translate("common.moreCountSuffix", { count }),
+    })
 
     if (loading && slowErrs.length === 0) input.setStore("status", "complete")
   })()
+
+  return { settled }
 }

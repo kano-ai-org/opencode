@@ -81,7 +81,7 @@ describe("bootstrapDirectory", () => {
     const mcpReads: string[] = []
     const [store, setStore] = directoryState()
 
-    await bootstrapDirectory({
+    const refresh = bootstrapDirectory({
       directory: "/project",
       scope: ServerScope.local,
       mcp: true,
@@ -138,7 +138,7 @@ describe("bootstrapDirectory", () => {
 
     expect(store.status).toBe("partial")
 
-    await new Promise((resolve) => setTimeout(resolve, 80))
+    await refresh.settled
 
     expect(store.status).toBe("complete")
     expect(legacyConfigReads).toEqual(["directory"])
@@ -148,7 +148,7 @@ describe("bootstrapDirectory", () => {
   test("skips legacy config while refreshing a v2 directory", async () => {
     const [store, setStore] = directoryState()
 
-    await bootstrapDirectory({
+    const refresh = bootstrapDirectory({
       directory: "/project",
       scope: ServerScope.local,
       mcp: false,
@@ -177,7 +177,7 @@ describe("bootstrapDirectory", () => {
 
     expect(store.status).toBe("partial")
 
-    await new Promise((resolve) => setTimeout(resolve, 80))
+    await refresh.settled
 
     expect(store.status).toBe("complete")
   })
