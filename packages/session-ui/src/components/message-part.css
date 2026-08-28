@@ -7,6 +7,29 @@
   gap: 12px;
 }
 
+[data-slot="message-timing"] {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-height: 16px;
+  color: var(--text-weak);
+  font-family: var(--font-family-sans);
+  font-size: 12px;
+  font-weight: var(--font-weight-regular);
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+}
+
+[data-slot="message-timing-indicator"] {
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--icon-success-base);
+}
+
 [data-component="user-message"] {
   font-family: var(--font-family-sans);
   font-size: var(--font-size-base);
@@ -167,10 +190,6 @@
     justify-content: flex-end;
     gap: 10px;
     width: 100%;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.15s ease;
-    will-change: opacity;
 
     [data-component="tooltip-trigger"] {
       display: inline-flex;
@@ -205,8 +224,18 @@
     text-align: end;
   }
 
-  &:hover [data-slot="user-message-copy-wrapper"],
-  &:focus-within [data-slot="user-message-copy-wrapper"] {
+  [data-slot="user-message-actions"] {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+    will-change: opacity;
+  }
+
+  &:hover [data-slot="user-message-actions"],
+  &:focus-within [data-slot="user-message-actions"] {
     opacity: 1;
     pointer-events: auto;
   }
@@ -246,6 +275,20 @@
     }
   }
 
+  [data-slot="text-part-copy-wrapper"][data-timing] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  [data-slot="text-part-actions"] {
+    display: inline-flex;
+    align-items: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+    will-change: opacity;
+  }
+
   [data-slot="text-part-meta"] {
     user-select: none;
   }
@@ -258,6 +301,12 @@
 
   &:hover [data-slot="text-part-copy-wrapper"],
   &:focus-within [data-slot="text-part-copy-wrapper"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  &:hover [data-slot="text-part-actions"],
+  &:focus-within [data-slot="text-part-actions"] {
     opacity: 1;
     pointer-events: auto;
   }

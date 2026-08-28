@@ -61,6 +61,10 @@
       width: 16px;
       height: 16px;
     }
+
+    [data-slot="message-timing"] {
+      margin-left: auto;
+    }
   }
 
   [data-component="text-reveal"].session-turn-thinking-heading {
