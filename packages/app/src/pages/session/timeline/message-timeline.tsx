@@ -23,7 +23,9 @@ import {
   ContextToolGroup,
   Message,
   MessageDivider,
+  MessageTiming,
   Part as MessagePart,
+  messageIDsEndingAtGroups,
   partDefaultOpen,
   type UserActions,
 } from "@opencode-ai/session-ui/message-part"
@@ -82,6 +84,7 @@ const emptyMessages: MessageType[] = []
 const emptyParts: PartType[] = []
 const emptyTools: ToolPart[] = []
 const emptyAssistantMessages: AssistantMessage[] = []
+const emptyMessageIDs: string[] = []
 const idle = { type: "idle" as const }
 
 type FramedTimelineRow = Exclude<TimelineRow.TimelineRow, { _tag: "TurnGap" }>
@@ -129,7 +132,11 @@ const markBoundaryGesture = (input: {
   }
 }
 
-function TimelineThinkingRow(props: { reasoningHeading?: string; showReasoningSummaries: boolean }) {
+function TimelineThinkingRow(props: {
+  message?: MessageType
+  reasoningHeading?: string
+  showReasoningSummaries: boolean
+}) {
   const language = useLanguage()
 
   return (
@@ -138,6 +145,7 @@ function TimelineThinkingRow(props: { reasoningHeading?: string; showReasoningSu
       <Show when={!props.showReasoningSummaries}>
         <TextReveal text={props.reasoningHeading} class="session-turn-thinking-heading" travel={25} duration={700} />
       </Show>
+      <Show when={props.message}>{(message) => <MessageTiming message={message()} live />}</Show>
     </div>
   )
 }
@@ -347,6 +355,23 @@ export function MessageTimeline(props: {
   const messageRowIndex = projection.messageRowIndex
   const timelineRowByKey = projection.rowByKey
   const timelineRows = projection.rows
+  const assistantTimingMessageIDs = createMemo(() =>
+    messageIDsEndingAtGroups(timelineRows().flatMap((row) => (row._tag === "AssistantPart" ? [row.group] : []))),
+  )
+  const assistantMessageIDsWithTiming = createMemo(() => new Set([...assistantTimingMessageIDs().values()].flat()))
+  const timingIDsForGroup = (groupKey: string) => assistantTimingMessageIDs().get(groupKey) ?? emptyMessageIDs
+  const standaloneTimingIDs = (row: TimelineRowMap["AssistantPart"]) => {
+    const messageIDs = timingIDsForGroup(row.group.key)
+    if (row.group.type === "context") return messageIDs
+    if (getMsgPart(row.group.ref.messageID, row.group.ref.partID)?.type === "text") return emptyMessageIDs
+    return messageIDs
+  }
+  const thinkingMessage = (userMessageID: string) => {
+    const latest = (assistantMessagesByParent().get(userMessageID) ?? emptyAssistantMessages).at(-1)
+    if (latest && !assistantMessageIDsWithTiming().has(latest.id)) return latest
+    if (latest) return
+    return messageByID().get(userMessageID)
+  }
 
   let prependAnchor: { key: string; offset: number } | undefined
   let prependAnchorFrame: number | undefined
@@ -1024,6 +1049,7 @@ export function MessageTimeline(props: {
                 part={part()}
                 message={message()}
                 showAssistantCopyPartID={assistantCopyPartID(row().userMessageID)}
+                showMessageTiming={timingIDsForGroup(row().group.key).includes(message().id)}
                 turnDurationMs={turnDurationMs(row().userMessageID)}
                 useV2Actions={settings.general.newLayoutDesigns()}
                 defaultOpen={defaultOpen()}
@@ -1173,6 +1199,13 @@ export function MessageTimeline(props: {
                 aria-hidden={workingTurn(assistantPartRow().userMessageID)}
               >
                 {renderAssistantPartGroup(assistantPartRow, onSizeChange)}
+                <For each={standaloneTimingIDs(assistantPartRow())}>
+                  {(messageID) => (
+                    <Show when={messageByID().get(messageID)}>
+                      {(message) => <MessageTiming message={message()} />}
+                    </Show>
+                  )}
+                </For>
               </div>
             </div>
           </TimelineRowFrame>
@@ -1184,6 +1217,7 @@ export function MessageTimeline(props: {
           <TimelineRowFrame row={thinkingRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <TimelineThinkingRow
+                message={thinkingMessage(thinkingRow().userMessageID)}
                 reasoningHeading={thinkingRow().reasoningHeading}
                 showReasoningSummaries={settings.general.showReasoningSummaries()}
               />
