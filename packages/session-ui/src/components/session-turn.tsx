@@ -15,6 +15,7 @@ import { createEffect, createMemo, createSignal, For, on, ParentProps, Show } fr
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import { AssistantParts, Message, MessageDivider, PART_MAPPING, type UserActions } from "./message-part"
+import { MessageTiming } from "./message-timing"
 import { Card } from "@opencode-ai/ui/card"
 import { Accordion } from "@opencode-ai/ui/accordion"
 import { StickyAccordionHeader } from "@opencode-ai/ui/sticky-accordion-header"
@@ -353,11 +354,13 @@ export function SessionTurn(
   const assistantDerived = createMemo(() => {
     let visible = 0
     let reason: string | undefined
+    const visibleMessages = new Set<string>()
     const show = showReasoningSummaries()
     for (const message of assistantMessages()) {
       for (const part of list(data.store.part?.[message.id], emptyParts)) {
         if (partState(part, show) === "visible") {
           visible++
+          visibleMessages.add(message.id)
         }
         if (part.type === "reasoning" && part.text) {
           const h = heading(part.text)
@@ -365,7 +368,7 @@ export function SessionTurn(
         }
       }
     }
-    return { visible, reason }
+    return { visible, reason, visibleMessages }
   })
   const assistantVisible = createMemo(() => assistantDerived().visible)
   const reasoningHeading = createMemo(() => assistantDerived().reason)
@@ -374,6 +377,12 @@ export function SessionTurn(
     if (status().type === "retry") return false
     if (showReasoningSummaries()) return assistantVisible() === 0
     return true
+  })
+  const thinkingTimingMessage = createMemo(() => {
+    const latest = assistantMessages().at(-1)
+    if (latest && !assistantDerived().visibleMessages.has(latest.id)) return latest
+    if (latest) return
+    return message()
   })
 
   const autoScroll = createAutoScroll({
@@ -430,6 +439,7 @@ export function SessionTurn(
                       duration={700}
                     />
                   </Show>
+                  <Show when={thinkingTimingMessage()}>{(message) => <MessageTiming message={message()} live />}</Show>
                 </div>
               </Show>
               <SessionRetry status={status()} show={active()} />
