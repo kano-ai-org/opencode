@@ -1,6 +1,7 @@
 import type { Message } from "@opencode-ai/sdk/v2"
 import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
+import { useData } from "../context"
 
 type MessageGroup =
   | { key: string; type: "part"; ref: { messageID: string } }
@@ -37,8 +38,17 @@ export function messageDurationMs(message: Message, now = Date.now(), live = fal
   return end - created
 }
 
+export function messageModelRef(message: Message) {
+  if (message.role === "user") return message.model
+  return {
+    providerID: message.providerID,
+    modelID: message.modelID,
+  }
+}
+
 export function MessageTiming(props: { message: Message; live?: boolean }) {
   const i18n = useI18n()
+  const data = useData()
   const [now, setNow] = createSignal(Date.now())
   const running = createMemo(
     () => !!props.live || (props.message.role === "assistant" && typeof props.message.time.completed !== "number"),
@@ -66,6 +76,12 @@ export function MessageTiming(props: { message: Message; live?: boolean }) {
     () => new Intl.DateTimeFormat(i18n.locale(), { dateStyle: "medium", timeStyle: "medium" }),
   )
   const numberFormat = createMemo(() => new Intl.NumberFormat(i18n.locale()))
+  const model = createMemo(() => {
+    const ref = messageModelRef(props.message)
+    if (!ref?.providerID || !ref.modelID) return ""
+    const provider = data.store.provider?.all?.get(ref.providerID)
+    return provider?.models?.[ref.modelID]?.name ?? ref.modelID
+  })
 
   const created = createMemo(() => props.message.time?.created)
   const timestamp = createMemo(() => {
@@ -103,6 +119,14 @@ export function MessageTiming(props: { message: Message; live?: boolean }) {
           <span data-slot="message-timing-indicator" aria-hidden="true" />
         </Show>
         <time dateTime={new Date(created()!).toISOString()}>{timestamp()}</time>
+        <Show when={model()}>
+          <span data-slot="message-timing-separator" aria-hidden="true">
+            {"\u00A0\u00B7\u00A0"}
+          </span>
+          <span data-slot="message-timing-model" title={model()}>
+            {model()}
+          </span>
+        </Show>
         <Show when={duration()}>
           <span data-slot="message-timing-separator" aria-hidden="true">
             {"\u00A0\u00B7\u00A0"}

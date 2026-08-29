@@ -10,7 +10,9 @@
 [data-slot="message-timing"] {
   display: inline-flex;
   align-items: center;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   min-height: 16px;
   color: var(--text-weak);
   font-family: var(--font-family-sans);
@@ -20,6 +22,20 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   user-select: none;
+}
+
+[data-slot="message-timing"] > time,
+[data-slot="message-timing-duration"],
+[data-slot="message-timing-separator"] {
+  flex: 0 0 auto;
+}
+
+[data-slot="message-timing-model"] {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(140px, 30vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 [data-slot="message-timing-indicator"] {

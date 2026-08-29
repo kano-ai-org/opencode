@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Message } from "@opencode-ai/sdk/v2"
-import { messageDurationMs, messageIDsEndingAtGroups } from "./message-timing"
+import { messageDurationMs, messageIDsEndingAtGroups, messageModelRef } from "./message-timing"
 
 const message = (role: "user" | "assistant", created: number, completed?: number) =>
   ({ role, time: { created, completed } }) as Message
@@ -22,6 +22,27 @@ describe("messageDurationMs", () => {
 
   test("ignores timestamps that end before they start", () => {
     expect(messageDurationMs(message("assistant", 4_000, 3_000), 9_000)).toBeUndefined()
+  })
+})
+
+describe("messageModelRef", () => {
+  test("reads provider and model IDs from a user message", () => {
+    const user = {
+      role: "user",
+      model: { providerID: "openai", modelID: "gpt-5.6-sol" },
+    } as Message
+
+    expect(messageModelRef(user)).toEqual({ providerID: "openai", modelID: "gpt-5.6-sol" })
+  })
+
+  test("reads provider and model IDs from an assistant message", () => {
+    const assistant = {
+      role: "assistant",
+      providerID: "openai",
+      modelID: "gpt-5.6-luna",
+    } as Message
+
+    expect(messageModelRef(assistant)).toEqual({ providerID: "openai", modelID: "gpt-5.6-luna" })
   })
 })
 

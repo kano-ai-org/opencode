@@ -1220,7 +1220,6 @@ export function UserMessageDisplay(props: {
   useV2Actions?: boolean
   comments?: UserMessageComment[]
 }) {
-  const data = useData()
   const dialog = useDialog()
   const i18n = useI18n()
   const [state, setState] = createStore({
@@ -1246,18 +1245,9 @@ export function UserMessageDisplay(props: {
 
   const agents = createMemo(() => (props.parts?.filter((p) => p.type === "agent") as AgentPart[]) ?? [])
 
-  const model = createMemo(() => {
-    const providerID = props.message.model?.providerID
-    const modelID = props.message.model?.modelID
-    if (!providerID || !modelID) return ""
-    const match = data.store.provider?.all?.get(providerID)
-    return match?.models?.[modelID]?.name ?? modelID
-  })
-
   const metaHead = createMemo(() => {
     const agent = props.message.agent
-    const items = [agent ? agent[0]?.toUpperCase() + agent.slice(1) : "", model()]
-    return items.filter((x) => !!x).join("\u00A0\u00B7\u00A0")
+    return agent ? agent[0]?.toUpperCase() + agent.slice(1) : ""
   })
 
   const openImagePreview = (url: string, alt?: string) => {
@@ -1681,19 +1671,11 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
       props.message.role === "assistant" && (props.message as AssistantMessage).error?.name === "MessageAbortedError",
   )
 
-  const model = createMemo(() => {
-    if (props.message.role !== "assistant") return ""
-    const message = props.message as AssistantMessage
-    const match = data.store.provider?.all?.get(message.providerID)
-    return match?.models?.[message.modelID]?.name ?? message.modelID
-  })
-
   const meta = createMemo(() => {
     if (props.message.role !== "assistant") return ""
     const agent = (props.message as AssistantMessage).agent
     const items = [
       agent ? agent[0]?.toUpperCase() + agent.slice(1) : "",
-      model(),
       interrupted() ? i18n.t("ui.message.interrupted") : "",
     ]
     return items.filter((x) => !!x).join(" \u00B7 ")
