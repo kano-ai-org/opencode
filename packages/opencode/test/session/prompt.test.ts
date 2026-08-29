@@ -35,7 +35,7 @@ import { SessionCompaction } from "../../src/session/compaction"
 import { SessionSummary } from "../../src/session/summary"
 import { Instruction } from "../../src/session/instruction"
 import { SessionProcessor } from "../../src/session/processor"
-import { SessionPrompt } from "../../src/session/prompt"
+import { SessionPrompt, startRuntimeToolWatchdog } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
@@ -243,6 +243,7 @@ function makeHttpNoLLMServer(input?: { mcpInstructions?: MCP.ServerInstructions[
 
 const it = testEffect(makeHttp())
 const noLLMServer = testEffect(makeHttpNoLLMServer())
+const watchdog = testEffect(Layer.empty)
 const raceNoLLMServer = testEffect(makeHttpNoLLMServer({ processor: "blocking" }))
 const withMcpInstructions = testEffect(
   makeHttp({
@@ -597,6 +598,68 @@ noLLMServer.instance(
   { config: cfg },
 )
 
+watchdog.live(
+  "runtime tool watchdog starts without an instance context",
+  () =>
+    Effect.gen(function* () {
+      const sessionID = SessionID.make("session_watchdog")
+      const busySessionID = SessionID.make("session_watchdog_busy")
+      const deferredSessionID = SessionID.make("session_watchdog_deferred")
+      const cancelled: SessionID[] = []
+      let scanned = false
+
+      const item = (rootSessionID: SessionID) => ({
+        rootSessionID,
+        sessionID: rootSessionID,
+        instance: {
+          directory: "/tmp/session-watchdog",
+          worktree: "/tmp/session-watchdog",
+          project: {
+            id: ProjectV2.ID.make("session-watchdog"),
+            worktree: "/tmp/session-watchdog",
+            sandboxes: [],
+            time: { created: 0, updated: 0 },
+          },
+        },
+        partID: PartID.ascending(),
+        tool: "read",
+        ageMs: 1_000,
+        timeoutMs: 1,
+      })
+
+      yield* startRuntimeToolWatchdog({
+        flags: {
+          runtimeToolWatchdogIntervalMs: 10,
+          runtimeToolStaleTimeoutMs: 1,
+          runtimeToolTimeoutGraceMs: 0,
+        },
+        batchSize: 2,
+        staleRuntimeToolRoots: () =>
+          Effect.sync(() => {
+            if (scanned) return []
+            scanned = true
+            return [item(busySessionID), item(sessionID), item(deferredSessionID)]
+          }),
+        isBusy: (candidate) => Effect.succeed(candidate.rootSessionID === busySessionID),
+        cancel: (item) =>
+          Effect.sync(() => {
+            cancelled.push(item.rootSessionID)
+          }),
+      })
+
+      yield* pollWithTimeout(
+        Effect.sync(() => {
+          if (cancelled.includes(sessionID)) return true
+        }),
+        "runtime tool watchdog did not interrupt the stale tool",
+      )
+
+      expect(cancelled).toContain(sessionID)
+      expect(cancelled).not.toContain(busySessionID)
+      expect(cancelled).not.toContain(deferredSessionID)
+    }),
+)
+
 noLLMServer.instance(
   "stale runtime tool roots include stale tools outside the current project",
   () =>
@@ -604,10 +667,13 @@ noLLMServer.instance(
       const sessions = yield* Session.Service
       const current = yield* sessions.create({ title: "Current" })
       const foreign = yield* sessions.create({ title: "Foreign" })
+      const active = yield* sessions.create({ title: "Active" })
       const currentSeed = yield* seed(current.id)
       const foreignSeed = yield* seed(foreign.id)
+      const activeSeed = yield* seed(active.id)
       const currentPartID = PartID.ascending()
       const foreignPartID = PartID.ascending()
+      const activePartID = PartID.ascending()
       const now = Date.now()
       const staleUpdated = now - 2_000
       const foreignProjectID = ProjectV2.ID.make("foreign-runtime-tool-project")
@@ -635,6 +701,19 @@ noLLMServer.instance(
         state: {
           status: "running",
           input: { filePath: "foreign.txt" },
+          time: { start: staleUpdated },
+        },
+      })
+      yield* sessions.updatePart({
+        id: activePartID,
+        messageID: activeSeed.assistant.id,
+        sessionID: active.id,
+        type: "tool",
+        callID: "active-call",
+        tool: "read",
+        state: {
+          status: "running",
+          input: { filePath: "active.txt" },
           time: { start: staleUpdated },
         },
       })
@@ -669,6 +748,24 @@ noLLMServer.instance(
         .where(eq(PartTable.id, foreignPartID))
         .run()
         .pipe(Effect.orDie)
+      yield* db
+        .update(PartTable)
+        .set({ time_updated: staleUpdated })
+        .where(eq(PartTable.id, activePartID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .update(SessionTable)
+        .set({ time_updated: staleUpdated })
+        .where(eq(SessionTable.id, current.id))
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .update(SessionTable)
+        .set({ time_updated: staleUpdated })
+        .where(eq(SessionTable.id, foreign.id))
+        .run()
+        .pipe(Effect.orDie)
 
       const stale = yield* sessions.staleRuntimeToolRoots({
         now,
@@ -679,7 +776,9 @@ noLLMServer.instance(
       const rootIDs = new Set(stale.map((item) => item.rootSessionID))
       expect(rootIDs.has(current.id)).toBe(true)
       expect(rootIDs.has(foreign.id)).toBe(true)
+      expect(rootIDs.has(active.id)).toBe(false)
       expect(stale.find((item) => item.rootSessionID === foreign.id)?.partID).toBe(foreignPartID)
+      expect(stale.find((item) => item.rootSessionID === foreign.id)?.instance.directory).toBe(foreign.directory)
     }),
   { config: cfg },
 )

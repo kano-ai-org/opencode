@@ -56,6 +56,7 @@ import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
 import { LLMEvent } from "@opencode-ai/llm"
+import { InstanceRef } from "@/effect/instance-ref"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -74,6 +75,97 @@ const SUPPORTED_MCP_RESOURCE_ATTACHMENT_MIMES = new Set([
 const DEFAULT_RUNTIME_TOOL_WATCHDOG_INTERVAL_MS = 60_000
 const DEFAULT_RUNTIME_TOOL_STALE_TIMEOUT_MS = 60 * 60 * 1000
 const DEFAULT_RUNTIME_TOOL_TIMEOUT_GRACE_MS = 60_000
+const DEFAULT_RUNTIME_TOOL_WATCHDOG_BATCH_SIZE = 1
+
+let runtimeToolWatchdogRunning = false
+let runtimeToolWatchdogNextRunAt = 0
+
+type RuntimeToolWatchdogInput = {
+  flags: Pick<
+    RuntimeFlags.Info,
+    "runtimeToolWatchdogIntervalMs" | "runtimeToolStaleTimeoutMs" | "runtimeToolTimeoutGraceMs"
+  >
+  staleRuntimeToolRoots: Session.Interface["staleRuntimeToolRoots"]
+  batchSize?: number
+  isBusy?: (item: Session.StaleRuntimeToolRoot) => Effect.Effect<boolean>
+  cancel: (item: Session.StaleRuntimeToolRoot) => Effect.Effect<void>
+}
+
+export const startRuntimeToolWatchdog = Effect.fn("SessionPrompt.startRuntimeToolWatchdog")(
+  function* (input: RuntimeToolWatchdogInput) {
+    const intervalMs = input.flags.runtimeToolWatchdogIntervalMs ?? DEFAULT_RUNTIME_TOOL_WATCHDOG_INTERVAL_MS
+    if (intervalMs <= 0) return
+
+    const defaultTimeoutMs = input.flags.runtimeToolStaleTimeoutMs ?? DEFAULT_RUNTIME_TOOL_STALE_TIMEOUT_MS
+    const graceMs = input.flags.runtimeToolTimeoutGraceMs ?? DEFAULT_RUNTIME_TOOL_TIMEOUT_GRACE_MS
+    const batchSize = Math.max(1, Math.floor(input.batchSize ?? DEFAULT_RUNTIME_TOOL_WATCHDOG_BATCH_SIZE))
+
+    yield* Effect.gen(function* () {
+      const now = Date.now()
+      const acquired = yield* Effect.sync(() => {
+        if (runtimeToolWatchdogRunning || now < runtimeToolWatchdogNextRunAt) return false
+        runtimeToolWatchdogRunning = true
+        runtimeToolWatchdogNextRunAt = now + intervalMs
+        return true
+      })
+      if (!acquired) return
+
+      yield* Effect.gen(function* () {
+        const stale = yield* input.staleRuntimeToolRoots({ defaultTimeoutMs, graceMs, limit: batchSize })
+        for (const item of stale.slice(0, batchSize)) {
+          if (input.isBusy && (yield* input.isBusy(item))) {
+            yield* Effect.logInfo("runtime tool watchdog skipped busy session", {
+              rootSessionID: item.rootSessionID,
+              sessionID: item.sessionID,
+              directory: item.instance.directory,
+              partID: item.partID,
+              tool: item.tool,
+              ageMs: item.ageMs,
+              timeoutMs: item.timeoutMs,
+            })
+            continue
+          }
+          yield* Effect.logWarning("runtime tool watchdog cancelling stale session", {
+            rootSessionID: item.rootSessionID,
+            sessionID: item.sessionID,
+            directory: item.instance.directory,
+            partID: item.partID,
+            tool: item.tool,
+            ageMs: item.ageMs,
+            timeoutMs: item.timeoutMs,
+          })
+          yield* input.cancel(item).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("runtime tool watchdog cancellation failed", {
+                rootSessionID: item.rootSessionID,
+                sessionID: item.sessionID,
+                directory: item.instance.directory,
+                partID: item.partID,
+                tool: item.tool,
+                ageMs: item.ageMs,
+                timeoutMs: item.timeoutMs,
+                cause: Cause.pretty(cause),
+              }).pipe(Effect.ignore),
+            ),
+          )
+        }
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            runtimeToolWatchdogRunning = false
+          }),
+        ),
+      )
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("runtime tool watchdog failed", { cause: Cause.pretty(cause) }).pipe(Effect.ignore),
+      ),
+      Effect.repeat(Schedule.spaced(Duration.millis(intervalMs))),
+      Effect.delay(Duration.millis(intervalMs)),
+      Effect.forkScoped,
+    )
+  },
+)
 
 const STRUCTURED_OUTPUT_DESCRIPTION = `Use this tool to return your final response in the requested structured format.
 
@@ -159,36 +251,17 @@ const layer = Layer.effect(
       yield* sessions.cleanupRuntimeToolParts({ sessionID })
     })
 
-    const startRuntimeToolWatchdog = Effect.fn("SessionPrompt.startRuntimeToolWatchdog")(function* () {
-      const hasInstance = yield* InstanceState.context.pipe(
-        Effect.as(true),
-        Effect.catchCause(() => Effect.succeed(false)),
-      )
-      if (!hasInstance) return
-
-      const intervalMs = flags.runtimeToolWatchdogIntervalMs ?? DEFAULT_RUNTIME_TOOL_WATCHDOG_INTERVAL_MS
-      if (intervalMs <= 0) return
-
-      const defaultTimeoutMs = flags.runtimeToolStaleTimeoutMs ?? DEFAULT_RUNTIME_TOOL_STALE_TIMEOUT_MS
-      const graceMs = flags.runtimeToolTimeoutGraceMs ?? DEFAULT_RUNTIME_TOOL_TIMEOUT_GRACE_MS
-
-      yield* Effect.gen(function* () {
-        const stale = yield* sessions.staleRuntimeToolRoots({ defaultTimeoutMs, graceMs })
-        for (const item of stale) {
-          yield* Effect.logWarning("runtime tool watchdog cancelling stale session", item)
-          yield* cancel(item.rootSessionID)
-        }
-      }).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("runtime tool watchdog failed", { cause: Cause.pretty(cause) }).pipe(Effect.ignore),
+    yield* startRuntimeToolWatchdog({
+      flags,
+      staleRuntimeToolRoots: sessions.staleRuntimeToolRoots,
+      isBusy: (item) =>
+        state.assertNotBusy(item.rootSessionID).pipe(
+          Effect.as(false),
+          Effect.catchTag("SessionBusyError", () => Effect.succeed(true)),
+          Effect.provideService(InstanceRef, item.instance),
         ),
-        Effect.repeat(Schedule.spaced(Duration.millis(intervalMs))),
-        Effect.delay(Duration.millis(intervalMs)),
-        Effect.forkScoped,
-      )
+      cancel: (item) => cancel(item.rootSessionID).pipe(Effect.provideService(InstanceRef, item.instance)),
     })
-
-    yield* startRuntimeToolWatchdog()
 
     const resolvePromptParts = Effect.fn("SessionPrompt.resolvePromptParts")(function* (template: string) {
       const ctx = yield* InstanceState.context

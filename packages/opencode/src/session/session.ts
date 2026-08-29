@@ -20,6 +20,7 @@ import { and } from "drizzle-orm"
 import { gte } from "drizzle-orm"
 import { isNull } from "drizzle-orm"
 import { desc } from "drizzle-orm"
+import { asc } from "drizzle-orm"
 import { like } from "drizzle-orm"
 import { sql } from "drizzle-orm"
 import { inArray } from "drizzle-orm"
@@ -30,6 +31,7 @@ import { PartTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { MessageV2 } from "./message-v2"
 import type { InstanceContext } from "../project/instance-context"
+import { Project } from "@/project/project"
 import { InstanceState } from "@/effect/instance-state"
 import { Snapshot } from "@/snapshot"
 import { ProjectV2 } from "@opencode-ai/core/project"
@@ -489,11 +491,13 @@ export type StaleRuntimeToolInput = {
   now?: number
   defaultTimeoutMs: number
   graceMs: number
+  limit?: number
 }
 
 export type StaleRuntimeToolRoot = {
   rootSessionID: SessionID
   sessionID: SessionID
+  instance: InstanceContext
   partID: PartID
   tool: string
   ageMs: number
@@ -768,19 +772,30 @@ export const layer: Layer.Layer<
 
     const staleRuntimeToolRoots = Effect.fn("Session.staleRuntimeToolRoots")(function* (input: StaleRuntimeToolInput) {
       const now = input.now ?? Date.now()
+      const candidateAgeMs = Math.min(input.defaultTimeoutMs, input.graceMs)
+      const rows = yield* db
+        .select({
+          part: PartTable,
+          updated: PartTable.time_updated,
+          directory: SessionTable.directory,
+          project: ProjectTable,
+        })
+        .from(PartTable)
+        .innerJoin(SessionTable, eq(PartTable.session_id, SessionTable.id))
+        .innerJoin(ProjectTable, eq(SessionTable.project_id, ProjectTable.id))
+        .where(and(lt(PartTable.time_updated, now - candidateAgeMs), runtimeToolPartCondition()))
+        .orderBy(asc(PartTable.time_updated))
+        .all()
+        .pipe(Effect.orDie)
+      if (rows.length === 0) return []
+
       const sessions = yield* db
-        .select({ id: SessionTable.id, parentID: SessionTable.parent_id })
+        .select({ id: SessionTable.id, parentID: SessionTable.parent_id, updated: SessionTable.time_updated })
         .from(SessionTable)
         .all()
         .pipe(Effect.orDie)
       const parents = new Map(sessions.map((session) => [session.id, session.parentID ?? undefined]))
-      const rows = yield* db
-        .select({ part: PartTable, updated: PartTable.time_updated })
-        .from(PartTable)
-        .innerJoin(SessionTable, eq(PartTable.session_id, SessionTable.id))
-        .where(runtimeToolPartCondition())
-        .all()
-        .pipe(Effect.orDie)
+      const updated = new Map(sessions.map((session) => [session.id, session.updated]))
 
       const stale: StaleRuntimeToolRoot[] = []
       const seenRoots = new Set<SessionID>()
@@ -792,16 +807,25 @@ export const layer: Layer.Layer<
         if (ageMs <= timeoutMs) continue
 
         const rootSessionID = rootOf(part.sessionID, parents)
+        const rootUpdated = updated.get(rootSessionID)
+        if (rootUpdated === undefined || now - rootUpdated <= timeoutMs) continue
         if (seenRoots.has(rootSessionID)) continue
         seenRoots.add(rootSessionID)
+        const project = Project.fromRow(row.project)
         stale.push({
           rootSessionID,
           sessionID: part.sessionID,
+          instance: {
+            directory: row.directory,
+            worktree: project.vcs ? row.directory : project.worktree,
+            project,
+          },
           partID: part.id,
           tool: part.tool,
           ageMs,
           timeoutMs,
         })
+        if (input.limit !== undefined && stale.length >= Math.max(0, Math.floor(input.limit))) break
       }
       return stale
     })
