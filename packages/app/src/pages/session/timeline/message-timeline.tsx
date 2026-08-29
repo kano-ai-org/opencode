@@ -78,6 +78,7 @@ import { scheduleConnectedMeasure } from "./measure"
 import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { createTimelineProjection } from "./projection"
 import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap } from "./rows"
+import { SessionActivityIndicator } from "./session-activity-indicator"
 import { filterVirtualIndexes } from "./virtual-items"
 
 const emptyMessages: MessageType[] = []
@@ -903,12 +904,16 @@ export function MessageTimeline(props: {
     return true
   }
 
-  const navigateParent = () => {
-    const id = parentID()
-    if (!id) return
+  const navigateSession = (id: string) => {
     navigate(
       params.serverKey ? sessionHref(requireServerKey(params.serverKey), id) : legacySessionHref(sdk().directory, id),
     )
+  }
+
+  const navigateParent = () => {
+    const id = parentID()
+    if (!id) return
+    navigateSession(id)
   }
 
   function DialogDeleteSession(props: { sessionID: string }) {
@@ -1508,6 +1513,7 @@ export function MessageTimeline(props: {
                       "gap-3": !settings.general.newLayoutDesigns(),
                     }}
                   >
+                    <SessionActivityIndicator sessionID={id} onOpenSession={navigateSession} />
                     <SessionContextUsage
                       placement="bottom"
                       buttonAppearance={settings.general.newLayoutDesigns() ? "v2" : "default"}
