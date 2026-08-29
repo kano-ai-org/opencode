@@ -1,4 +1,5 @@
 import { sqliteTable, text, integer, index, primaryKey, real, uniqueIndex } from "drizzle-orm/sqlite-core"
+import { sql } from "drizzle-orm"
 import * as DatabasePath from "../database/path"
 import { ProjectTable } from "../project/sql"
 import type { SessionMessage } from "./message"
@@ -94,6 +95,11 @@ export const PartTable = sqliteTable(
   (table) => [
     index("part_message_id_id_idx").on(table.message_id, table.id),
     index("part_session_idx").on(table.session_id),
+    index("part_runtime_tool_updated_idx")
+      .on(table.time_updated)
+      .where(
+        sql`json_extract(${table.data}, '$.type') = 'tool' and json_extract(${table.data}, '$.state.status') in ('pending', 'running')`,
+      ),
   ],
 )
 
