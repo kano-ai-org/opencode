@@ -150,7 +150,8 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         throw error
       }
 
-      recordStreamFailure(entry)
+      if (error instanceof ProviderError.WebSocketConnectTimeoutError) entry.fallback = true
+      else recordStreamFailure(entry)
       invalidate(entry)
       if (entry.fallback) return httpFetch(input, httpInit)
       return failedResponse(

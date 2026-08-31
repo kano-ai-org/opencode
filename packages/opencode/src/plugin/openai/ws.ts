@@ -94,7 +94,7 @@ export function connectResponsesWebSocket(options: ConnectResponsesWebSocketOpti
           cleanup()
           socket.on("error", () => {})
           socket.terminate()
-          reject(new Error("WebSocket connect timed out"))
+          reject(new ProviderError.WebSocketConnectTimeoutError())
         }, options.timeout)
       : undefined
 
