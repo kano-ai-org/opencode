@@ -9,6 +9,7 @@ import { generateText, jsonSchema, type ModelMessage } from "ai"
 import { createAmazonBedrock, type AmazonBedrockLanguageModelOptions } from "@ai-sdk/amazon-bedrock"
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { createVertexAnthropic } from "@ai-sdk/google-vertex/anthropic"
+import { ProviderTest } from "../fake/provider"
 
 describe("ProviderTransform.options - setCacheKey", () => {
   const sessionID = "test-session-123"
@@ -3798,7 +3799,15 @@ describe("ProviderTransform sampling defaults - DeepSeek", () => {
 
 describe("ProviderTransform sampling defaults - MiniMax M3", () => {
   test("uses the MiniMax recommended temperature and topP", () => {
-    const model = { id: "minimax/MiniMax-M3", api: { id: "MiniMax-M3" } } as any
+    const model = ProviderTest.model({
+      id: ModelV2.ID.make("minimax/MiniMax-M3"),
+      providerID: ProviderV2.ID.make("minimax"),
+      api: {
+        id: ModelV2.ID.make("MiniMax-M3"),
+        url: "https://api.minimax.io/anthropic",
+        npm: "@ai-sdk/anthropic",
+      },
+    })
 
     expect(ProviderTransform.temperature(model)).toBe(1.0)
     expect(ProviderTransform.topP(model)).toBe(0.95)
