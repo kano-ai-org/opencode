@@ -20,6 +20,14 @@ export class ResponseStreamError extends Error {
   }
 }
 
+export class WebSocketConnectTimeoutError extends Error {
+  public override readonly name = "ProviderWebSocketConnectTimeoutError"
+
+  constructor() {
+    super("WebSocket connect timed out")
+  }
+}
+
 function isOpenAiErrorRetryable(e: APICallError) {
   const status = e.statusCode
   if (!status) return e.isRetryable
