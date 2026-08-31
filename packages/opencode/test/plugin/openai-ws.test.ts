@@ -693,13 +693,13 @@ describe("plugin.openai.ws-pool", () => {
     fetch.close()
   })
 
-  test("reserves a websocket lane while its socket is connecting", async () => {
+  test("falls back to HTTP after a websocket connect timeout while reserving the lane", async () => {
     await using server = await createHangingTcpServer()
     await using fallback = await createHttpServer()
     const fetch = OpenAIWebSocketPool.createWebSocketFetch({
       url: server.url,
       connectTimeout: 20,
-      streamRetries: 0,
+      streamRetries: 5,
     })
 
     const first = fetch(fallback.url, streamRequest())
