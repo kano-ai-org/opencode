@@ -7,6 +7,7 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { generateText, jsonSchema, type ModelMessage } from "ai"
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
+import { ProviderTest } from "../fake/provider"
 
 describe("ProviderTransform.options - setCacheKey", () => {
   const sessionID = "test-session-123"
@@ -3448,7 +3449,15 @@ describe("ProviderTransform sampling defaults - DeepSeek", () => {
 
 describe("ProviderTransform sampling defaults - MiniMax M3", () => {
   test("uses the MiniMax recommended temperature and topP", () => {
-    const model = { id: "minimax/MiniMax-M3", api: { id: "MiniMax-M3" } } as any
+    const model = ProviderTest.model({
+      id: ModelV2.ID.make("minimax/MiniMax-M3"),
+      providerID: ProviderV2.ID.make("minimax"),
+      api: {
+        id: ModelV2.ID.make("MiniMax-M3"),
+        url: "https://api.minimax.io/anthropic",
+        npm: "@ai-sdk/anthropic",
+      },
+    })
 
     expect(ProviderTransform.temperature(model)).toBe(1.0)
     expect(ProviderTransform.topP(model)).toBe(0.95)
