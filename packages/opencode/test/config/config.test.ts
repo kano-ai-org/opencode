@@ -1,5 +1,6 @@
 import { test, expect, describe, afterEach, beforeEach, spyOn } from "bun:test"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
+import { ConfigErrorV1 } from "@opencode-ai/core/v1/config/error"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import { Cause, Effect, Exit, Layer, Logger, Option } from "effect"
@@ -570,16 +571,16 @@ it.effect("rejects native project permissions even with inherited V1 rules", () 
     Effect.gen(function* () {
       const exit = yield* Effect.exit(Config.use.get())
       expect(Exit.isFailure(exit)).toBe(true)
-      if (Exit.isFailure(exit))
-        expect(Cause.squash(exit.cause)).toMatchObject({
-          data: {
-            path: expect.stringContaining("project/opencode.json"),
-            issues: [
-              { path: ["permissions"], message: expect.stringContaining('Use V1 "permission" rules or run opencode2') },
-              { path: ["agents", "reviewer", "permissions"], message: expect.stringContaining("not supported") },
-            ],
-          },
-        })
+      if (Exit.isFailure(exit)) {
+        const error = Cause.squash(exit.cause)
+        expect(error).toBeInstanceOf(ConfigErrorV1.InvalidError)
+        if (!(error instanceof ConfigErrorV1.InvalidError)) return
+        expect(error.data.path).toContain(path.join("project", "opencode.json"))
+        expect(error.data.issues).toEqual([
+          { path: ["permissions"], message: expect.stringContaining('Use V1 "permission" rules or run opencode2') },
+          { path: ["agents", "reviewer", "permissions"], message: expect.stringContaining("not supported") },
+        ])
+      }
     }),
   ),
 )
