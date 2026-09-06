@@ -1,3 +1,40 @@
+diff --git a/dist/Deferred.js b/dist/Deferred.js
+index 2fc15f8..238c133 100644
+--- a/dist/Deferred.js
++++ b/dist/Deferred.js
+@@ -81,8 +81,12 @@ const _await = self => internalEffect.callback(resume => {
+   self.resumes ??= [];
+   self.resumes.push(resume);
+   return internalEffect.sync(() => {
++    // Completion resumes every waiter and clears the array, so a cleanup
++    // that runs after completion (an interrupt racing the resume) has
++    // nothing to unregister.
++    if (!self.resumes) return;
+     const index = self.resumes.indexOf(resume);
+-    self.resumes.splice(index, 1);
++    if (index >= 0) self.resumes.splice(index, 1);
+   });
+ });
+ export {
+diff --git a/src/Deferred.ts b/src/Deferred.ts
+index 225660d..65193a5 100644
+--- a/src/Deferred.ts
++++ b/src/Deferred.ts
+@@ -188,8 +188,12 @@ const _await = <A, E>(self: Deferred<A, E>): Effect<A, E> =>
+     self.resumes ??= []
+     self.resumes.push(resume)
+     return internalEffect.sync(() => {
+-      const index = self.resumes!.indexOf(resume)
+-      self.resumes!.splice(index, 1)
++      // Completion resumes every waiter and clears the array, so a cleanup
++      // that runs after completion (an interrupt racing the resume) has
++      // nothing to unregister.
++      if (!self.resumes) return
++      const index = self.resumes.indexOf(resume)
++      if (index >= 0) self.resumes.splice(index, 1)
+     })
+   })
+
 diff --git a/dist/unstable/httpapi/HttpApiSchema.js b/dist/unstable/httpapi/HttpApiSchema.js
 index ecb6603d1ee4e89e92174b3a1100e8c9c720b3f3..08b832b6b3e9e4d10df156eca36b16f571f67f6e 100644
 --- a/dist/unstable/httpapi/HttpApiSchema.js
